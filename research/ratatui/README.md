@@ -124,14 +124,49 @@ drawn through the same `&Theme`, so `t` repaints every chart, bar and log line o
   itself (0.34 s CPU, from its own `/proc/self/stat`; bash `time` over the demo and journalctl gives 0.320 s user
   and 0.041 s sys). journalctl used under one clock tick. `--fps 60` costs 2.07 %. The run wrote 4,281 bytes a second,
   with no full-screen clear (`\e[2J` 0 times): ratatui's buffer diff sends only changed cells, so nothing flickers.
-- **Size and tests:** stripped release binary 1,132,472 bytes, up 340,840 (+43 %) on the first screen. The added
+- **Size and tests:** stripped release binary 1,139,728 bytes, up 348,096 (+44 %) on the first screen (7,256 of it the button geometry below). The added
   normal dependency is `serde_json`, already a build dependency; it brings `itoa`, `memchr`, `serde_core` and `zmij`.
-  `tests/dashboard.rs` holds 10 headless tests. In every theme they check the `100%`, `-60s` and `now` labels in
+  `tests/dashboard.rs` holds 10 headless tests, and `tests/render.rs` 10. In every theme they check the `100%`, `-60s` and `now` labels in
   `--muted-foreground`, the CPU and received series colours, and each severity's colour plus the timestamp, host and
   unit roles on a log line. They also check that `t` changes the CPU series from formal's `--chart-1` to
   cyberpunk's, that 16 colours leave no RGB and keep every tag, and that pause, filter and scroll behave. The rest
   cover the pulse with and without motion, the title reveal, and the `/proc` and journal parsers on fixtures. None
   reads `/proc` or spawns a process.
+
+## The button's geometry
+
+Kenny, 2026-09-17, after the dashboard: the buttons are "wat zwak", and he
+asked whether their geometry itself could carry a theme as stylistic as
+cyberpunk. A one-cell line around a label was formal's button applied to
+all three themes. `Anatomy::button_face` now says how a button is built:
+
+| Theme     | Face                      | Read from                                                                                                                        |
+| --------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| formal    | `Line`, rounded, one cell | `formal-register.css .kp-button`: a 1px border and a radius. The restraint is the point                                          |
+| cyberpunk | `Slab { slit, notch }`    | `cyberpunk-register.css .kp-button`: a frame with the face inset 2px, a 10px slit of ground through both ends, a 14px corner cut |
+| terminal  | `Plate`                   | `themes/terminal/anatomy.md` "the buttons are brackets and plates": the plate, and the brackets, and no second frame             |
+
+What that means in cells. The slab's frame is painted as a **background**
+one cell thick rather than a line glyph, so it reads as a bar of colour at
+any font size: `▁▁▁` never looks like 2px, a filled row does. The slit is
+the frame's left and right cell at mid-height painted in the ground, and it
+**closes when the button is pressed** — the one state the geometry carries
+itself (GUESS: the register moves the whole button by `--fx-lift`, which a
+cell grid cannot). The notch is `◢` in the frame colour on the ground, so
+the corner reads as cut away rather than drawn. cyberpunk's
+`letter-spacing: 0.12em` becomes a space between characters, dropped again
+when the label would not otherwise fit.
+
+The charge sweep came with it: `animation: kp-charge 520ms` runs when a
+button takes focus, two cells wide, entering and leaving beyond both edges,
+painted behind the label as `z-index: -1` puts it. A cell grid has no
+alpha, so the band is the charge colour itself instead of the register's
+0.5-0.6 opacity. Reduced motion shows no sweep.
+
+Measured: `tests/render.rs` checks the frame bar, the slit on both ends,
+the slit closing under `Pressed`, the notch glyph and its ground, the
+spaced label, and that the sweep travels left to right and leaves by the
+right edge. Buttons cost 7,256 bytes of binary.
 
 ## Recommendation
 

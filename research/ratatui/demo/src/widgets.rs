@@ -9,7 +9,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Tabs, Widget},
 };
 
-use crate::anatomy::Reveal;
+use crate::anatomy::{ButtonFace, Reveal};
 use crate::color::{ColorDepth, Rgb, Role};
 use crate::fx::{self, Motion};
 use crate::theme::Theme;
@@ -146,11 +146,15 @@ pub struct Button<'a> {
     label: &'a str,
     kind: ButtonKind,
     state: ButtonState,
+    /// How far the charge sweep has run, 0.0 to 1.0. `None` is no sweep:
+    /// reduced motion, a theme without one, or a button nothing just
+    /// focused.
+    charge: Option<f32>,
 }
 
 impl<'a> Button<'a> {
     pub fn new(theme: &'a Theme, label: &'a str) -> Self {
-        Button { theme, label, kind: ButtonKind::Primary, state: ButtonState::Rest }
+        Button { theme, label, kind: ButtonKind::Primary, state: ButtonState::Rest, charge: None }
     }
     pub fn kind(mut self, kind: ButtonKind) -> Self {
         self.kind = kind;
@@ -159,6 +163,24 @@ impl<'a> Button<'a> {
     pub fn state(mut self, state: ButtonState) -> Self {
         self.state = state;
         self
+    }
+    /// cyberpunk-register.css `.kp-button:hover::after { animation:
+    /// kp-charge 520ms }`: a band of light crosses the face once. A cell
+    /// grid has no alpha, so the band is painted in the charge colour
+    /// itself rather than at the register's 0.5-0.6 opacity.
+    pub fn charge(mut self, progress: Option<f32>) -> Self {
+        self.charge = progress;
+        self
+    }
+
+    /// The colour the charge sweep is painted in: the register gives the
+    /// bare button the accent and a filled one its own ink.
+    fn charge_colour(&self) -> Color {
+        let t = &self.theme.c;
+        match self.kind {
+            ButtonKind::Primary => t.primary_foreground,
+            ButtonKind::Destructive => t.destructive_foreground,
+        }
     }
 
     /// Plate, ink and frame colour for the current state.
@@ -178,32 +200,133 @@ impl<'a> Button<'a> {
     }
 }
 
+impl Button<'_> {
+    /// The label as it is written on the plate: the register's case, its
+    /// brackets, and a space between characters where it sets
+    /// `letter-spacing`.
+    fn text(&self) -> String {
+        let a = self.theme.a;
+        let text = if a.uppercase_labels { self.label.to_uppercase() } else { self.label.to_string() };
+        let text =
+            if a.button_spaced { text.chars().map(|c| c.to_string()).collect::<Vec<_>>().join(" ") } else { text };
+        format!("{}{}{}", a.button_brackets.0, text, a.button_brackets.1)
+    }
+
+    fn label_style(&self, ink: Color, plate: Color) -> Style {
+        let mut style = Style::new().fg(ink).bg(plate).add_modifier(Modifier::BOLD);
+        match self.state {
+            ButtonState::Focus => style = style.add_modifier(self.theme.a.focus_modifier),
+            ButtonState::Disabled => style = style.add_modifier(Modifier::DIM),
+            _ => {}
+        }
+        style
+    }
+}
+
 impl Widget for Button<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let a = self.theme.a;
         let (plate, ink, frame) = self.colors();
-        let set = match self.state {
-            ButtonState::Focus | ButtonState::Pressed if a.border_focus != a.border => a.border_focus,
-            _ => a.button_border,
-        };
-        let mut label_style = Style::new().fg(ink).bg(plate).add_modifier(Modifier::BOLD);
-        match self.state {
-            ButtonState::Focus => label_style = label_style.add_modifier(a.focus_modifier),
-            ButtonState::Disabled => label_style = label_style.add_modifier(Modifier::DIM),
-            _ => {}
+        let label = self.text();
+        match a.button_face {
+            ButtonFace::Line => {
+                let set = match self.state {
+                    ButtonState::Focus | ButtonState::Pressed if a.border_focus != a.border => a.border_focus,
+                    _ => a.button_border,
+                };
+                let block = Block::new()
+                    .borders(Borders::ALL)
+                    .border_set(set)
+                    .border_style(Style::new().fg(frame).bg(plate))
+                    .style(Style::new().bg(plate));
+                Paragraph::new(Line::from(Span::styled(label, self.label_style(ink, plate))))
+                    .alignment(Alignment::Center)
+                    .block(block)
+                    .render(area, buf);
+            }
+            // The plate alone. The label sits on the colour, so the button
+            // is as wide and as tall as the area it was given.
+            ButtonFace::Plate => {
+                Paragraph::new(Line::from(Span::styled(label, self.label_style(ink, plate))))
+                    .alignment(Alignment::Center)
+                    .style(Style::new().bg(plate))
+                    .render(area, buf);
+            }
+            ButtonFace::Slab { slit, notch } => self.slab(area, buf, plate, ink, frame, slit, notch),
         }
-        let text = if a.uppercase_labels { self.label.to_uppercase() } else { self.label.to_string() };
-        let label = format!("{}{}{}", a.button_brackets.0, text, a.button_brackets.1);
-        let block = Block::new()
-            .borders(Borders::ALL)
-            .border_set(set)
-            .border_style(Style::new().fg(frame).bg(plate))
-            .style(Style::new().bg(plate));
-        Paragraph::new(Line::from(Span::styled(label, label_style)))
-            .alignment(Alignment::Center)
-            .block(block)
-            .render(area, buf);
     }
+}
+
+impl Button<'_> {
+    /// A solid frame one cell thick, the face inside it, and the register's
+    /// two marks: the slit through both side bars at mid-height, and the
+    /// bottom-right corner cut on the diagonal. The frame is painted as
+    /// BACKGROUND rather than a line glyph, so it reads as a bar of colour
+    /// at any font — the 2px frame of `.kp-button`, not a hairline.
+    #[allow(clippy::too_many_arguments)]
+    fn slab(self, area: Rect, buf: &mut Buffer, plate: Color, ink: Color, frame: Color, slit: bool, notch: bool) {
+        if area.width < 3 || area.height < 3 {
+            return;
+        }
+        let ground = self.theme.c.background;
+        let (right, bottom) = (area.right() - 1, area.bottom() - 1);
+        let middle = area.y + area.height / 2;
+        for y in area.y..=bottom {
+            for x in area.x..=right {
+                let edge = x == area.x || x == right || y == area.y || y == bottom;
+                let cell = &mut buf[(x, y)];
+                cell.set_symbol(" ");
+                cell.set_style(Style::new().bg(if edge { frame } else { plate }).fg(ink));
+            }
+        }
+        // The slit: the band of ground that crosses both ends of the frame.
+        // Pressed, the slit closes — the one state change the geometry
+        // itself carries (GUESS: the register moves the whole button
+        // instead, which a cell grid cannot).
+        if slit && self.state != ButtonState::Pressed {
+            for x in [area.x, right] {
+                buf[(x, middle)].set_style(Style::new().bg(ground).fg(frame));
+            }
+        }
+        if notch {
+            buf[(right, bottom)].set_symbol("◢");
+            buf[(right, bottom)].set_style(Style::new().fg(frame).bg(ground));
+        }
+        let inner = Rect::new(area.x + 1, middle, area.width - 2, 1);
+        Paragraph::new(Line::from(Span::styled(label_fit(&self.text(), inner.width), self.label_style(ink, plate))))
+            .alignment(Alignment::Center)
+            .render(inner, buf);
+        // The charge sweep crosses the face left to right, two cells wide,
+        // entering and leaving beyond both edges as the gradient does.
+        if let Some(p) = self.charge.filter(|p| (0.0..=1.0).contains(p)) {
+            let span = area.width as f32 + 4.0;
+            let centre = area.x as f32 - 2.0 + p * span;
+            let sweep = self.charge_colour();
+            for x in (area.x + 1)..right {
+                if (x as f32 - centre).abs() < 1.5 {
+                    for y in (area.y + 1)..bottom {
+                        // The sweep runs BEHIND the label (`z-index: -1` on
+                        // `.kp-button::after`), so only the ground moves.
+                        buf[(x, y)].set_bg(sweep);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A label that does not fit its plate loses its spacing first, then its
+/// tail: a clipped word is worse than a tight one.
+fn label_fit(label: &str, width: u16) -> String {
+    let width = width as usize;
+    if label.chars().count() <= width {
+        return label.to_string();
+    }
+    let tight: String = label.chars().filter(|c| *c != ' ').collect();
+    if tight.chars().count() <= width {
+        return tight;
+    }
+    tight.chars().take(width).collect()
 }
 
 // ── Reveal ──────────────────────────────────────────────────────────────

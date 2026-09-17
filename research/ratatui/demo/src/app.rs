@@ -43,6 +43,10 @@ const CONTENT: [(&str, &str, &str); 3] = [
     ),
 ];
 
+/// cyberpunk-register.css `animation: kp-charge 520ms`, the sweep across a
+/// button's face.
+pub const CHARGE_MS: u32 = 520;
+
 pub const BUTTONS: [(&str, ButtonKind); 2] = [("Deploy", ButtonKind::Primary), ("Roll back", ButtonKind::Destructive)];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,6 +71,11 @@ pub struct App {
     /// protocol is on), so "pressed" is shown for a fixed time.
     pub pressed: Option<(usize, u32)>,
     pub reveal_ms: u32,
+    /// Milliseconds since the focused button took focus, while its charge
+    /// sweep runs. cyberpunk sweeps on hover; a keyboard TUI has no
+    /// pointer, so focus is where it lands (GUESS, as with the focus
+    /// modifier).
+    pub charge_ms: Option<u32>,
     pub config_path: Option<PathBuf>,
     pub message: String,
     pub quit: bool,
@@ -115,6 +124,7 @@ impl App {
             focus: 0,
             pressed: None,
             reveal_ms: 0,
+            charge_ms: None,
             config_path,
             message: String::new(),
             quit: false,
@@ -149,6 +159,7 @@ impl App {
     pub fn tick(&mut self, ms: u32) {
         self.reveal_ms = self.reveal_ms.saturating_add(ms);
         self.dash.tick(ms);
+        self.charge_ms = self.charge_ms.map(|c| c + ms).filter(|c| *c < CHARGE_MS);
         if let Some((i, left)) = self.pressed {
             self.pressed = left.checked_sub(ms).filter(|l| *l > 0).map(|l| (i, l));
         }
@@ -179,7 +190,10 @@ impl App {
                 self.tab = (self.tab + 1) % TABS.len();
                 self.reveal_ms = 0;
             }
-            KeyCode::Tab | KeyCode::BackTab => self.focus = (self.focus + 1) % BUTTONS.len(),
+            KeyCode::Tab | KeyCode::BackTab => {
+                self.focus = (self.focus + 1) % BUTTONS.len();
+                self.charge_ms = Some(0);
+            }
             KeyCode::Enter | KeyCode::Char(' ') => {
                 self.pressed = Some((self.focus, 160));
                 self.message = format!("{} pressed", BUTTONS[self.focus].0);
@@ -279,7 +293,11 @@ impl App {
                 _ if self.focus == i => ButtonState::Focus,
                 _ => ButtonState::Rest,
             };
-            frame.render_widget(Button::new(th, label).kind(*kind).state(state), rows[i * 2]);
+            let charge = match (self.focus == i, self.config.motion) {
+                (true, Motion::Full) => self.charge_ms.map(|c| c as f32 / CHARGE_MS as f32),
+                _ => None,
+            };
+            frame.render_widget(Button::new(th, label).kind(*kind).state(state).charge(charge), rows[i * 2]);
         }
 
         // Every button state at once, so no key has to be pressed to judge them.
