@@ -15,7 +15,25 @@
 
 use std::{collections::BTreeMap, env, fmt::Write as _, fs, path::PathBuf};
 
-const THEMES: &[&str] = &["formal", "cyberpunk", "terminal"];
+/// Every theme the package ships, in its own order (`themes/order.json`).
+/// It was three while the demo was one screen; the anatomy of all
+/// twenty-two is what the crates need [scope-127].
+fn theme_names(root: &std::path::Path) -> Vec<String> {
+    let path = root.join("themes/order.json");
+    println!("cargo:rerun-if-changed={}", path.display());
+    let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let json: serde_json::Value = serde_json::from_str(&text).expect("order.json parses");
+    json.as_array()
+        .expect("order.json is an array")
+        .iter()
+        .map(|v| v.as_str().expect("a theme name").to_string())
+        .collect()
+}
+
+/// A theme name as a Rust identifier: `shade-light` -> `SHADE_LIGHT`.
+fn upper(name: &str) -> String {
+    name.replace('-', "_").to_uppercase()
+}
 
 /// Field name in Rust, token name in CSS, role (decides the 16-colour fallback).
 const FIELDS: &[(&str, &str, &str)] = &[
@@ -125,7 +143,8 @@ fn main() {
     }
     writeln!(out, "        }}\n    }}\n}}\n").unwrap();
 
-    for theme in THEMES {
+    let names = theme_names(&root);
+    for theme in &names {
         let path = root.join(format!("themes/{theme}/tokens.json"));
         println!("cargo:rerun-if-changed={}", path.display());
         let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
@@ -140,7 +159,7 @@ fn main() {
             values.iter().filter_map(|(k, v)| Some((k.clone(), v.clone(), parse_hsl(v)?))).collect();
         values.extend(derived_block(&css, theme));
 
-        let upper = theme.to_uppercase();
+        let upper = upper(theme);
         let dark = values.get("color-scheme").map(|v| v == "dark").unwrap_or(false);
         let ms = values.get("fx-duration").and_then(|v| v.trim_end_matches("ms").parse::<u32>().ok()).unwrap_or(180);
         writeln!(out, "pub const {upper}_DARK: bool = {dark};").unwrap();
@@ -164,6 +183,34 @@ fn main() {
         }
         writeln!(out, "];\n").unwrap();
     }
+
+    // The three lookups the crate reads by index, so adding a theme is a
+    // line in order.json and nothing else.
+    writeln!(out, "pub const NAMES: &[&str] = &[").unwrap();
+    for theme in &names {
+        writeln!(out, "    {theme:?},").unwrap();
+    }
+    writeln!(out, "];\n").unwrap();
+    writeln!(out, "pub const PALETTES: &[Palette<Rgb>] = &[").unwrap();
+    for theme in &names {
+        writeln!(out, "    {},", upper(theme)).unwrap();
+    }
+    writeln!(out, "];\n").unwrap();
+    writeln!(out, "pub const TOKENS: &[&[(&str, Rgb)]] = &[").unwrap();
+    for theme in &names {
+        writeln!(out, "    {}_TOKENS,", upper(theme)).unwrap();
+    }
+    writeln!(out, "];\n").unwrap();
+    writeln!(out, "pub const IS_DARK: &[bool] = &[").unwrap();
+    for theme in &names {
+        writeln!(out, "    {}_DARK,", upper(theme)).unwrap();
+    }
+    writeln!(out, "];\n").unwrap();
+    writeln!(out, "pub const FX_DURATION_MS: &[u32] = &[").unwrap();
+    for theme in &names {
+        writeln!(out, "    {}_FX_DURATION_MS,", upper(theme)).unwrap();
+    }
+    writeln!(out, "];\n").unwrap();
 
     let dest = PathBuf::from(env::var("OUT_DIR").unwrap()).join("palettes.rs");
     fs::write(dest, out).unwrap();

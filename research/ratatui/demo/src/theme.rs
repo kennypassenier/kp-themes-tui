@@ -7,71 +7,90 @@ use crate::anatomy::{self, Anatomy};
 use crate::color::{ColorDepth, Rgb};
 use crate::generated::{self, Palette};
 
+/// One of the package's themes, by its place in `themes/order.json`.
+///
+/// It was an enum of three while the demo carried three; all twenty-two
+/// have an anatomy now [scope-127], and twenty-two variants with six
+/// matches each is a table written out by hand. The named constants below
+/// keep every call site reading the same (`ThemeId::Cyberpunk`), and a new
+/// theme is a line in `order.json` and a row in `anatomy.rs`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ThemeId {
-    Formal,
-    Cyberpunk,
-    Terminal,
-}
+pub struct ThemeId(pub usize);
 
 impl ThemeId {
-    pub const ALL: [ThemeId; 3] = [ThemeId::Formal, ThemeId::Cyberpunk, ThemeId::Terminal];
+    pub const FORMAL: ThemeId = ThemeId(0);
+    pub const LIGHT: ThemeId = ThemeId(1);
+    pub const DARK: ThemeId = ThemeId(2);
+    pub const CYBERPUNK: ThemeId = ThemeId(3);
+    pub const SYNTHWAVE: ThemeId = ThemeId(4);
+    pub const PASTEL: ThemeId = ThemeId(5);
+    pub const TERMINAL: ThemeId = ThemeId(6);
+    pub const FOREST: ThemeId = ThemeId(7);
+    pub const HIGH_CONTRAST: ThemeId = ThemeId(8);
+    pub const SEPIA: ThemeId = ThemeId(9);
+    pub const BLUEPRINT: ThemeId = ThemeId(10);
+    pub const SOLSTICE: ThemeId = ThemeId(11);
+    pub const BRUTALISM: ThemeId = ThemeId(12);
+    pub const DECO: ThemeId = ThemeId(13);
+    pub const PHANTOM: ThemeId = ThemeId(14);
+    pub const SHADE_LIGHT: ThemeId = ThemeId(15);
+    pub const SHADE_DARK: ThemeId = ThemeId(16);
+    pub const RETRO: ThemeId = ThemeId(17);
+    pub const GROTESK: ThemeId = ThemeId(18);
+    pub const LAPIS: ThemeId = ThemeId(19);
+    pub const NOSTROMO: ThemeId = ThemeId(20);
+    pub const TITANIUM: ThemeId = ThemeId(21);
+
+    // The three the demo carried first, spelled the way every call site
+    // already spells them.
+    #[allow(non_upper_case_globals)]
+    pub const Formal: ThemeId = Self::FORMAL;
+    #[allow(non_upper_case_globals)]
+    pub const Cyberpunk: ThemeId = Self::CYBERPUNK;
+    #[allow(non_upper_case_globals)]
+    pub const Terminal: ThemeId = Self::TERMINAL;
+
+    /// Every theme, in the package's own order.
+    pub const ALL: [ThemeId; 22] = {
+        let mut all = [ThemeId(0); 22];
+        let mut i = 0;
+        while i < 22 {
+            all[i] = ThemeId(i);
+            i += 1;
+        }
+        all
+    };
 
     pub fn name(self) -> &'static str {
-        match self {
-            ThemeId::Formal => "formal",
-            ThemeId::Cyberpunk => "cyberpunk",
-            ThemeId::Terminal => "terminal",
-        }
+        generated::NAMES[self.0]
     }
 
     pub fn from_name(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|t| t.name() == name)
+        generated::NAMES.iter().position(|n| *n == name).map(ThemeId)
     }
 
     pub fn next(self) -> Self {
-        let i = Self::ALL.iter().position(|t| *t == self).unwrap();
-        Self::ALL[(i + 1) % Self::ALL.len()]
+        ThemeId((self.0 + 1) % generated::NAMES.len())
     }
 
     pub fn palette(self) -> &'static Palette<Rgb> {
-        match self {
-            ThemeId::Formal => &generated::FORMAL,
-            ThemeId::Cyberpunk => &generated::CYBERPUNK,
-            ThemeId::Terminal => &generated::TERMINAL,
-        }
+        &generated::PALETTES[self.0]
     }
 
     pub fn tokens(self) -> &'static [(&'static str, Rgb)] {
-        match self {
-            ThemeId::Formal => generated::FORMAL_TOKENS,
-            ThemeId::Cyberpunk => generated::CYBERPUNK_TOKENS,
-            ThemeId::Terminal => generated::TERMINAL_TOKENS,
-        }
+        generated::TOKENS[self.0]
     }
 
     pub fn anatomy(self) -> &'static Anatomy {
-        match self {
-            ThemeId::Formal => &anatomy::FORMAL,
-            ThemeId::Cyberpunk => &anatomy::CYBERPUNK,
-            ThemeId::Terminal => &anatomy::TERMINAL,
-        }
+        anatomy::ANATOMIES[self.0]
     }
 
     pub fn dark(self) -> bool {
-        match self {
-            ThemeId::Formal => generated::FORMAL_DARK,
-            ThemeId::Cyberpunk => generated::CYBERPUNK_DARK,
-            ThemeId::Terminal => generated::TERMINAL_DARK,
-        }
+        generated::IS_DARK[self.0]
     }
 
     pub fn fx_duration_ms(self) -> u32 {
-        match self {
-            ThemeId::Formal => generated::FORMAL_FX_DURATION_MS,
-            ThemeId::Cyberpunk => generated::CYBERPUNK_FX_DURATION_MS,
-            ThemeId::Terminal => generated::TERMINAL_FX_DURATION_MS,
-        }
+        generated::FX_DURATION_MS[self.0]
     }
 }
 

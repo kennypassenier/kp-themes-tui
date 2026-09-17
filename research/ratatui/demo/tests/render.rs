@@ -65,11 +65,14 @@ fn a_key_switches_the_theme_for_the_next_frame_and_persists_it() {
     let before = render(&app);
     app.key(KeyEvent::new_with_kind(KeyCode::Char('t'), KeyModifiers::NONE, KeyEventKind::Press));
     let after = render(&app);
+    // `t` steps through the package's own order; from formal that is light
+    // now that all twenty-two are in [scope-127].
+    let next = ThemeId::Formal.next();
     assert_eq!(before[(W - 1, 0)].bg, rgb(ThemeId::Formal.palette().background));
-    assert_eq!(after[(W - 1, 0)].bg, rgb(ThemeId::Cyberpunk.palette().background));
-    assert_eq!(Config::load(&path).theme, ThemeId::Cyberpunk);
+    assert_eq!(after[(W - 1, 0)].bg, rgb(next.palette().background));
+    assert_eq!(Config::load(&path).theme, next);
     app.key(KeyEvent::new_with_kind(KeyCode::Char('m'), KeyModifiers::NONE, KeyEventKind::Press));
-    assert_eq!(Config::load(&path), Config { theme: ThemeId::Cyberpunk, motion: Motion::Reduced });
+    assert_eq!(Config::load(&path), Config { theme: next, motion: Motion::Reduced });
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
 
@@ -204,4 +207,59 @@ fn each_reveal_runs_its_own_routine() {
     let f = fx::frame(text, r, 100, Motion::Full);
     assert_eq!(f.text, text);
     assert!(f.opacity > 0.0 && f.opacity < 1.0);
+}
+
+// scope-127: every theme the package ships has an anatomy, and the six
+// registers that declare --kp-word-stagger reveal their headline word by
+// word instead of as one plate.
+#[test]
+fn all_twenty_two_themes_carry_an_anatomy() {
+    assert_eq!(ThemeId::ALL.len(), 22);
+    let mut seen = std::collections::BTreeSet::new();
+    for id in ThemeId::ALL {
+        let th = Theme::new(id, ColorDepth::TrueColor);
+        // A palette and an anatomy, and a name that is the package's own.
+        assert!(!id.name().is_empty(), "{id:?} has no name");
+        assert!(seen.insert(id.name()), "{} appears twice", id.name());
+        assert_eq!(ThemeId::from_name(id.name()), Some(id));
+        // The anatomy is the theme's own, not a default: every prefix that
+        // a register declares reaches the panel title.
+        let panel: String = format!("{}{}", th.a.label_prefix, "RELEASE");
+        assert!(panel.ends_with("RELEASE"), "{}: {panel}", id.name());
+    }
+    // The order is the package's order, so index and name agree.
+    assert_eq!(ThemeId::ALL[0].name(), "formal");
+    assert_eq!(ThemeId::ALL[21].name(), "titanium");
+    // Stepping with `t` walks the whole set and comes back.
+    let mut id = ThemeId::Formal;
+    for _ in 0..22 {
+        id = id.next();
+    }
+    assert_eq!(id, ThemeId::Formal);
+}
+
+#[test]
+fn a_word_staggered_reveal_lights_its_words_in_turn() {
+    // The six registers that declare --kp-word-stagger: dark and titanium
+    // 28 ms, phantom 28, brutalism 60, shade-light 70, shade-dark 90.
+    for name in ["dark", "phantom", "brutalism", "shade-light", "shade-dark", "titanium"] {
+        let id = ThemeId::from_name(name).expect(name);
+        assert!(matches!(id.anatomy().reveal, Reveal::Words { .. }), "{name} does not reveal word by word");
+    }
+    let Reveal::Words { ms, stagger_ms } = ThemeId::from_name("shade-dark").unwrap().anatomy().reveal else {
+        panic!("shade-dark is not word-staggered");
+    };
+    assert_eq!((ms, stagger_ms), (600, 90));
+    // Early on, the first word is further along than the last.
+    let text = "Version 2.4 is ready to deploy";
+    let early = fx::frame(text, Reveal::Words { ms, stagger_ms }, 120, fx::Motion::Full);
+    assert_eq!(early.words.len(), 6, "one entry per word");
+    assert!(early.words[0].1 > early.words[5].1, "{:?}", early.words);
+    assert_eq!(early.words[5].1, 0.0, "the last word has not started");
+    // The whole line is lit once the last word has had its own duration.
+    let whole = fx::frame(text, Reveal::Words { ms, stagger_ms }, ms + stagger_ms * 5, fx::Motion::Full);
+    assert!(whole.words.is_empty() && whole.done, "it finishes as one plate");
+    // Reduced motion shows the finished line on the first frame.
+    let still = fx::frame(text, Reveal::Words { ms, stagger_ms }, 0, fx::Motion::Reduced);
+    assert!(still.done && still.words.is_empty());
 }

@@ -18,6 +18,11 @@ pub enum Reveal {
     /// Typed one glyph at a time with a block caret on the last.
     /// terminal `type`.
     Type { cps: f32 },
+    /// Whole words arriving one after another, `stagger_ms` apart: the
+    /// register's `--kp-word-stagger`, which six themes declare and which
+    /// `Arrive` threw away [scope-127]. No character is touched, only the
+    /// moment a word becomes its own colour.
+    Words { ms: u32, stagger_ms: u32 },
 }
 
 /// How a button's plate ends. Every theme's button is a filled plate with
@@ -65,6 +70,18 @@ pub struct Anatomy {
 /// cyberpunk's notch: the bottom-right corner cut on the diagonal
 /// (`clip-path` on `.kp-button`, `css/cyberpunk-register.css`).
 pub const NOTCHED: border::Set<'static> = border::Set { bottom_right: "◢", ..border::PLAIN };
+
+/// dark's chamfer: the top-right and bottom-left corners cut on the
+/// diagonal (`clip-path` in `css/dark-register.css`, on the controls and
+/// on the panels).
+pub const CHAMFER_FALL: border::Set<'static> = border::Set { top_right: "◥", bottom_left: "◣", ..border::PLAIN };
+
+/// titanium's chamfer: the same cut, mirrored (`css/titanium-register.css`).
+pub const CHAMFER_RISE: border::Set<'static> = border::Set { top_left: "◤", bottom_right: "◢", ..border::PLAIN };
+
+/// phantom's panel: no frame, one heavy bar down the left edge
+/// (`.kp-card { border: 0; border-left: 5px solid var(--primary) }`).
+pub const PHANTOM_BAR: border::Set<'static> = border::Set { vertical_left: "┃", ..border::PLAIN };
 
 /// formal. Paper and ink; restraint; one rule that doubles.
 pub const FORMAL: Anatomy = Anatomy {
@@ -163,3 +180,391 @@ pub const TERMINAL: Anatomy = Anatomy {
     // terminal-register.css `--kp-decipher-cps: 29.41`, the `type` routine.
     reveal: Reveal::Type { cps: 29.41 },
 };
+
+/// light. Proposed in research/ratatui/ANATOMY_PROPOSAL.md, which cites the
+/// register line behind every field and marks the guesses [scope-127].
+pub const LIGHT: Anatomy = Anatomy {
+    border: border::ROUNDED,
+    border_focus: border::THICK,
+    button_border: border::ROUNDED,
+    button_face: ButtonFace::Soft,
+    button_spaced: false,
+    title_modifier: Modifier::BOLD,
+    uppercase_labels: false,
+    label_prefix: "",
+    button_brackets: ("", ""),
+    focus_modifier: Modifier::empty(),
+    tab_divider: " │ ",
+    selected_tab_modifier: Modifier::UNDERLINED,
+    cursor: SetCursorStyle::SteadyBar,
+    reveal: Reveal::Arrive { ms: 620 },
+};
+
+/// dark. Proposed in research/ratatui/ANATOMY_PROPOSAL.md, which cites the
+/// register line behind every field and marks the guesses [scope-127].
+pub const DARK: Anatomy = Anatomy {
+    border: CHAMFER_FALL,
+    border_focus: border::THICK,
+    button_border: CHAMFER_FALL,
+    button_face: ButtonFace::Square,
+    button_spaced: false,
+    title_modifier: Modifier::BOLD,
+    uppercase_labels: false,
+    label_prefix: "· ",
+    button_brackets: ("", ""),
+    focus_modifier: Modifier::BOLD,
+    tab_divider: " │ ",
+    selected_tab_modifier: Modifier::UNDERLINED,
+    cursor: SetCursorStyle::SteadyBar,
+    reveal: Reveal::Words { ms: 640, stagger_ms: 28 },
+};
+
+/// synthwave. Proposed in research/ratatui/ANATOMY_PROPOSAL.md, which cites the
+/// register line behind every field and marks the guesses [scope-127].
+pub const SYNTHWAVE: Anatomy = Anatomy {
+    border: border::PLAIN,
+    border_focus: border::DOUBLE,
+    button_border: border::PLAIN,
+    button_face: ButtonFace::Square,
+    button_spaced: true,
+    title_modifier: Modifier::BOLD,
+    uppercase_labels: true,
+    label_prefix: "▶ ",
+    button_brackets: ("", ""),
+    focus_modifier: Modifier::empty(),
+    tab_divider: " │ ",
+    selected_tab_modifier: Modifier::UNDERLINED,
+    cursor: SetCursorStyle::SteadyBlock,
+    reveal: Reveal::Arrive { ms: 700 },
+};
+
+/// pastel. Proposed in research/ratatui/ANATOMY_PROPOSAL.md, which cites the
+/// register line behind every field and marks the guesses [scope-127].
+pub const PASTEL: Anatomy = Anatomy {
+    border: border::ROUNDED,
+    border_focus: border::THICK,
+    button_border: border::ROUNDED,
+    button_face: ButtonFace::Soft,
+    button_spaced: false,
+    title_modifier: Modifier::BOLD,
+    uppercase_labels: false,
+    label_prefix: "",
+    button_brackets: ("", ""),
+    focus_modifier: Modifier::empty(),
+    tab_divider: " │ ",
+    selected_tab_modifier: Modifier::UNDERLINED,
+    cursor: SetCursorStyle::SteadyBar,
+    reveal: Reveal::Arrive { ms: 650 },
+};
+
+/// forest. Proposed in research/ratatui/ANATOMY_PROPOSAL.md, which cites the
+/// register line behind every field and marks the guesses [scope-127].
+pub const FOREST: Anatomy = Anatomy {
+    border: border::ROUNDED,
+    border_focus: border::THICK,
+    button_border: border::ROUNDED,
+    button_face: ButtonFace::Soft,
+    button_spaced: false,
+    title_modifier: Modifier::BOLD,
+    uppercase_labels: false,
+    label_prefix: "◦ ",
+    button_brackets: ("", ""),
+    focus_modifier: Modifier::empty(),
+    tab_divider: " │ ",
+    selected_tab_modifier: Modifier::UNDERLINED,
+    cursor: SetCursorStyle::SteadyBar,
+    reveal: Reveal::Arrive { ms: 500 },
+};
+
+/// high-contrast. Proposed in research/ratatui/ANATOMY_PROPOSAL.md, which cites the
+/// register line behind every field and marks the guesses [scope-127].
+pub const HIGH_CONTRAST: Anatomy = Anatomy {
+    border: border::THICK,
+    border_focus: border::DOUBLE,
+    button_border: border::THICK,
+    button_face: ButtonFace::Square,
+    button_spaced: false,
+    title_modifier: Modifier::BOLD,
+    uppercase_labels: false,
+    label_prefix: "",
+    button_brackets: ("", ""),
+    focus_modifier: Modifier::empty(),
+    tab_divider: " │ ",
+    selected_tab_modifier: Modifier::UNDERLINED,
+    cursor: SetCursorStyle::SteadyBlock,
+    reveal: Reveal::Arrive { ms: 550 },
+};
+
+/// sepia. Proposed in research/ratatui/ANATOMY_PROPOSAL.md, which cites the
+/// register line behind every field and marks the guesses [scope-127].
+pub const SEPIA: Anatomy = Anatomy {
+    border: border::ROUNDED,
+    border_focus: border::DOUBLE,
+    button_border: border::ROUNDED,
+    button_face: ButtonFace::Soft,
+    button_spaced: false,
+    title_modifier: Modifier::BOLD,
+    uppercase_labels: false,
+    label_prefix: "",
+    button_brackets: ("", ""),
+    focus_modifier: Modifier::empty(),
+    tab_divider: " │ ",
+    selected_tab_modifier: Modifier::UNDERLINED,
+    cursor: SetCursorStyle::SteadyBar,
+    reveal: Reveal::Arrive { ms: 1050 },
+};
+
+/// blueprint. Proposed in research/ratatui/ANATOMY_PROPOSAL.md, which cites the
+/// register line behind every field and marks the guesses [scope-127].
+pub const BLUEPRINT: Anatomy = Anatomy {
+    border: border::PLAIN,
+    border_focus: border::THICK,
+    button_border: border::PLAIN,
+    button_face: ButtonFace::Square,
+    button_spaced: false,
+    title_modifier: Modifier::BOLD,
+    uppercase_labels: false,
+    label_prefix: "",
+    button_brackets: ("", ""),
+    focus_modifier: Modifier::empty(),
+    tab_divider: " │ ",
+    selected_tab_modifier: Modifier::UNDERLINED,
+    cursor: SetCursorStyle::SteadyBar,
+    reveal: Reveal::Arrive { ms: 300 },
+};
+
+/// solstice. Proposed in research/ratatui/ANATOMY_PROPOSAL.md, which cites the
+/// register line behind every field and marks the guesses [scope-127].
+pub const SOLSTICE: Anatomy = Anatomy {
+    border: border::ROUNDED,
+    border_focus: border::THICK,
+    button_border: border::ROUNDED,
+    button_face: ButtonFace::Soft,
+    button_spaced: false,
+    title_modifier: Modifier::BOLD,
+    uppercase_labels: false,
+    label_prefix: "",
+    button_brackets: ("", ""),
+    focus_modifier: Modifier::empty(),
+    tab_divider: " │ ",
+    selected_tab_modifier: Modifier::UNDERLINED,
+    cursor: SetCursorStyle::SteadyBar,
+    reveal: Reveal::Arrive { ms: 740 },
+};
+
+/// brutalism. Proposed in research/ratatui/ANATOMY_PROPOSAL.md, which cites the
+/// register line behind every field and marks the guesses [scope-127].
+pub const BRUTALISM: Anatomy = Anatomy {
+    border: border::THICK,
+    border_focus: border::DOUBLE,
+    button_border: border::THICK,
+    button_face: ButtonFace::Square,
+    button_spaced: true,
+    title_modifier: Modifier::BOLD,
+    uppercase_labels: true,
+    label_prefix: "",
+    button_brackets: ("", ""),
+    focus_modifier: Modifier::empty(),
+    tab_divider: "  ",
+    selected_tab_modifier: Modifier::empty(),
+    cursor: SetCursorStyle::SteadyBlock,
+    reveal: Reveal::Words { ms: 260, stagger_ms: 60 },
+};
+
+/// deco. Proposed in research/ratatui/ANATOMY_PROPOSAL.md, which cites the
+/// register line behind every field and marks the guesses [scope-127].
+pub const DECO: Anatomy = Anatomy {
+    border: border::PLAIN,
+    border_focus: border::PLAIN,
+    button_border: border::PLAIN,
+    button_face: ButtonFace::Square,
+    button_spaced: false,
+    title_modifier: Modifier::BOLD,
+    uppercase_labels: true,
+    label_prefix: "",
+    button_brackets: ("", ""),
+    focus_modifier: Modifier::empty(),
+    tab_divider: " │ ",
+    selected_tab_modifier: Modifier::UNDERLINED,
+    cursor: SetCursorStyle::SteadyBar,
+    reveal: Reveal::Arrive { ms: 520 },
+};
+
+/// phantom. Proposed in research/ratatui/ANATOMY_PROPOSAL.md, which cites the
+/// register line behind every field and marks the guesses [scope-127].
+pub const PHANTOM: Anatomy = Anatomy {
+    border: PHANTOM_BAR,
+    border_focus: border::DOUBLE,
+    button_border: PHANTOM_BAR,
+    button_face: ButtonFace::Square,
+    button_spaced: true,
+    title_modifier: Modifier::BOLD,
+    uppercase_labels: true,
+    label_prefix: "▮ ",
+    button_brackets: ("", ""),
+    focus_modifier: Modifier::empty(),
+    tab_divider: "  ",
+    selected_tab_modifier: Modifier::empty(),
+    cursor: SetCursorStyle::SteadyBlock,
+    reveal: Reveal::Words { ms: 620, stagger_ms: 28 },
+};
+
+/// shade-light. Proposed in research/ratatui/ANATOMY_PROPOSAL.md, which cites the
+/// register line behind every field and marks the guesses [scope-127].
+pub const SHADE_LIGHT: Anatomy = Anatomy {
+    border: border::ROUNDED,
+    border_focus: border::DOUBLE,
+    button_border: border::ROUNDED,
+    button_face: ButtonFace::Soft,
+    button_spaced: false,
+    title_modifier: Modifier::BOLD,
+    uppercase_labels: false,
+    label_prefix: "",
+    button_brackets: ("", ""),
+    focus_modifier: Modifier::empty(),
+    tab_divider: " │ ",
+    selected_tab_modifier: Modifier::UNDERLINED,
+    cursor: SetCursorStyle::SteadyBar,
+    reveal: Reveal::Words { ms: 520, stagger_ms: 70 },
+};
+
+/// shade-dark. Proposed in research/ratatui/ANATOMY_PROPOSAL.md, which cites the
+/// register line behind every field and marks the guesses [scope-127].
+pub const SHADE_DARK: Anatomy = Anatomy {
+    border: border::ROUNDED,
+    border_focus: border::DOUBLE,
+    button_border: border::ROUNDED,
+    button_face: ButtonFace::Soft,
+    button_spaced: false,
+    title_modifier: Modifier::BOLD,
+    uppercase_labels: false,
+    label_prefix: "",
+    button_brackets: ("", ""),
+    focus_modifier: Modifier::empty(),
+    tab_divider: " │ ",
+    selected_tab_modifier: Modifier::UNDERLINED,
+    cursor: SetCursorStyle::SteadyBar,
+    reveal: Reveal::Words { ms: 600, stagger_ms: 90 },
+};
+
+/// retro. Proposed in research/ratatui/ANATOMY_PROPOSAL.md, which cites the
+/// register line behind every field and marks the guesses [scope-127].
+pub const RETRO: Anatomy = Anatomy {
+    border: border::DOUBLE,
+    border_focus: border::DOUBLE,
+    button_border: border::DOUBLE,
+    button_face: ButtonFace::Square,
+    button_spaced: false,
+    title_modifier: Modifier::BOLD,
+    uppercase_labels: false,
+    label_prefix: "> ",
+    button_brackets: ("", ""),
+    focus_modifier: Modifier::REVERSED,
+    tab_divider: "  ",
+    selected_tab_modifier: Modifier::BOLD,
+    cursor: SetCursorStyle::SteadyBlock,
+    reveal: Reveal::Arrive { ms: 640 },
+};
+
+/// grotesk. Proposed in research/ratatui/ANATOMY_PROPOSAL.md, which cites the
+/// register line behind every field and marks the guesses [scope-127].
+pub const GROTESK: Anatomy = Anatomy {
+    border: border::THICK,
+    border_focus: border::THICK,
+    button_border: border::THICK,
+    button_face: ButtonFace::Square,
+    button_spaced: false,
+    title_modifier: Modifier::BOLD,
+    uppercase_labels: false,
+    label_prefix: "",
+    button_brackets: ("", ""),
+    focus_modifier: Modifier::REVERSED,
+    tab_divider: " │ ",
+    selected_tab_modifier: Modifier::UNDERLINED,
+    cursor: SetCursorStyle::SteadyBar,
+    reveal: Reveal::Arrive { ms: 640 },
+};
+
+/// lapis. Proposed in research/ratatui/ANATOMY_PROPOSAL.md, which cites the
+/// register line behind every field and marks the guesses [scope-127].
+pub const LAPIS: Anatomy = Anatomy {
+    border: border::ROUNDED,
+    border_focus: border::THICK,
+    button_border: border::ROUNDED,
+    button_face: ButtonFace::Soft,
+    button_spaced: false,
+    title_modifier: Modifier::BOLD,
+    uppercase_labels: false,
+    label_prefix: "",
+    button_brackets: ("", ""),
+    focus_modifier: Modifier::empty(),
+    tab_divider: "  ",
+    selected_tab_modifier: Modifier::empty(),
+    cursor: SetCursorStyle::SteadyBar,
+    reveal: Reveal::Arrive { ms: 900 },
+};
+
+/// nostromo. Proposed in research/ratatui/ANATOMY_PROPOSAL.md, which cites the
+/// register line behind every field and marks the guesses [scope-127].
+pub const NOSTROMO: Anatomy = Anatomy {
+    border: border::ROUNDED,
+    border_focus: border::DOUBLE,
+    button_border: border::ROUNDED,
+    button_face: ButtonFace::Soft,
+    button_spaced: true,
+    title_modifier: Modifier::BOLD,
+    uppercase_labels: true,
+    label_prefix: "",
+    button_brackets: ("", ""),
+    focus_modifier: Modifier::empty(),
+    tab_divider: "  ",
+    selected_tab_modifier: Modifier::UNDERLINED,
+    cursor: SetCursorStyle::SteadyBlock,
+    reveal: Reveal::Arrive { ms: 340 },
+};
+
+/// titanium. Proposed in research/ratatui/ANATOMY_PROPOSAL.md, which cites the
+/// register line behind every field and marks the guesses [scope-127].
+pub const TITANIUM: Anatomy = Anatomy {
+    border: CHAMFER_RISE,
+    border_focus: border::DOUBLE,
+    button_border: CHAMFER_RISE,
+    button_face: ButtonFace::Square,
+    button_spaced: false,
+    title_modifier: Modifier::BOLD,
+    uppercase_labels: false,
+    label_prefix: "· ",
+    button_brackets: ("", ""),
+    focus_modifier: Modifier::empty(),
+    tab_divider: " │ ",
+    selected_tab_modifier: Modifier::UNDERLINED,
+    cursor: SetCursorStyle::SteadyBar,
+    reveal: Reveal::Words { ms: 640, stagger_ms: 28 },
+};
+
+/// Every theme's anatomy, in `themes/order.json`'s order, so `ThemeId`
+/// indexes straight into it.
+pub const ANATOMIES: [&Anatomy; 22] = [
+    &FORMAL,
+    &LIGHT,
+    &DARK,
+    &CYBERPUNK,
+    &SYNTHWAVE,
+    &PASTEL,
+    &TERMINAL,
+    &FOREST,
+    &HIGH_CONTRAST,
+    &SEPIA,
+    &BLUEPRINT,
+    &SOLSTICE,
+    &BRUTALISM,
+    &DECO,
+    &PHANTOM,
+    &SHADE_LIGHT,
+    &SHADE_DARK,
+    &RETRO,
+    &GROTESK,
+    &LAPIS,
+    &NOSTROMO,
+    &TITANIUM,
+];

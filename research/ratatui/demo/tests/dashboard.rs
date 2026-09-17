@@ -153,10 +153,12 @@ fn the_theme_key_changes_a_series_colour_on_the_next_frame() {
     let before = braille_colours(&render(&app), a.cpu);
     press(&mut app, 't');
     let after = braille_colours(&render(&app), a.cpu);
-    let (formal, cyberpunk) = (rgb(ThemeId::Formal.palette().chart_1), rgb(ThemeId::Cyberpunk.palette().chart_1));
-    assert_ne!(formal, cyberpunk);
-    assert!(before.contains(&formal) && !before.contains(&cyberpunk));
-    assert!(after.contains(&cyberpunk) && !after.contains(&formal));
+    // `t` steps to the next theme in the package's own order, which is
+    // light since all twenty-two arrived [scope-127].
+    let (formal, next) = (rgb(ThemeId::Formal.palette().chart_1), rgb(ThemeId::Formal.next().palette().chart_1));
+    assert_ne!(formal, next);
+    assert!(before.contains(&formal) && !before.contains(&next));
+    assert!(after.contains(&next) && !after.contains(&formal));
 }
 
 #[test]

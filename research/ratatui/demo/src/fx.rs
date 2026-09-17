@@ -26,6 +26,10 @@ pub struct RevealFrame {
     /// 0.0 = the text is the ground's colour, 1.0 = its own.
     pub opacity: f32,
     pub done: bool,
+    /// For `Words`: the opacity of each word, in order, with the spaces
+    /// between them carried on the word before. Empty for every other
+    /// routine, which fades or types the whole line at once.
+    pub words: Vec<(String, f32)>,
 }
 
 pub fn duration_ms(reveal: Reveal, text: &str) -> u32 {
@@ -34,6 +38,11 @@ pub fn duration_ms(reveal: Reveal, text: &str) -> u32 {
         Reveal::Arrive { ms } => ms,
         Reveal::Decipher { cps, lead_ms, .. } => lead_ms + (n * 1000.0 / cps) as u32,
         Reveal::Type { cps } => (n * 1000.0 / cps) as u32,
+        // The last word starts after every earlier one has begun.
+        Reveal::Words { ms, stagger_ms } => {
+            let words = text.split_whitespace().count().max(1) as u32;
+            ms + stagger_ms * (words - 1)
+        }
     }
 }
 
@@ -46,7 +55,7 @@ fn hash(a: u64, b: u64) -> u64 {
 }
 
 pub fn frame(text: &str, reveal: Reveal, elapsed_ms: u32, motion: Motion) -> RevealFrame {
-    let whole = RevealFrame { text: text.to_string(), caret: None, opacity: 1.0, done: true };
+    let whole = RevealFrame { text: text.to_string(), caret: None, opacity: 1.0, done: true, words: Vec::new() };
     if motion == Motion::Reduced || elapsed_ms >= duration_ms(reveal, text) {
         return whole;
     }
@@ -57,7 +66,7 @@ pub fn frame(text: &str, reveal: Reveal, elapsed_ms: u32, motion: Motion) -> Rev
             // `--fx-ease: cubic-bezier(0.2, 0, 0, 1)` approximated by a
             // cubic ease-out; close enough for a 450 ms fade.
             let eased = 1.0 - (1.0 - t).powi(3);
-            RevealFrame { text: text.to_string(), caret: None, opacity: eased, done: false }
+            RevealFrame { text: text.to_string(), caret: None, opacity: eased, done: false, words: Vec::new() }
         }
         Reveal::Decipher { cps, lead_ms, swap } => {
             let per_char = 1000.0 / cps;
@@ -78,11 +87,34 @@ pub fn frame(text: &str, reveal: Reveal, elapsed_ms: u32, motion: Motion) -> Rev
                     GLYPHS[(hash(i as u64 ^ 0xD1, b) % GLYPHS.len() as u64) as usize]
                 })
                 .collect();
-            RevealFrame { text: out, caret: None, opacity: 1.0, done: false }
+            RevealFrame { text: out, caret: None, opacity: 1.0, done: false, words: Vec::new() }
         }
         Reveal::Type { cps } => {
             let typed = ((elapsed_ms as f32 * cps / 1000.0) as usize).min(chars.len());
-            RevealFrame { text: chars[..typed].iter().collect(), caret: Some(typed), opacity: 1.0, done: false }
+            RevealFrame {
+                text: chars[..typed].iter().collect(),
+                caret: Some(typed),
+                opacity: 1.0,
+                done: false,
+                words: Vec::new(),
+            }
+        }
+        // `--kp-word-stagger`: word `i` starts `i * stagger_ms` in and
+        // takes `ms`, on the same ease as Arrive. Nothing is typed and no
+        // character changes; only the moment a word reaches its colour.
+        Reveal::Words { ms, stagger_ms } => {
+            let pieces: Vec<&str> = text.split_inclusive(' ').collect();
+            let words = pieces
+                .iter()
+                .enumerate()
+                .map(|(i, piece)| {
+                    let start = (i as u32) * stagger_ms;
+                    let t = elapsed_ms.saturating_sub(start) as f32 / ms as f32;
+                    let eased = if t <= 0.0 { 0.0 } else { 1.0 - (1.0 - t.min(1.0)).powi(3) };
+                    ((*piece).to_string(), eased)
+                })
+                .collect();
+            RevealFrame { text: text.to_string(), caret: None, opacity: 1.0, done: false, words }
         }
     }
 }

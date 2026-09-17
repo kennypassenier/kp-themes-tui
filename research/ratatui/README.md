@@ -169,6 +169,38 @@ themes, the ring strip and its absence when pressed, that no frame or
 corner glyph is drawn at all, each theme's own plate end, the spaced caps,
 the brackets, and the sweep travelling left to right.
 
+## All twenty-two themes carry their anatomy
+
+Kenny, 2026-09-17: build the proposal in, and judge it in the running demo
+rather than on paper. So `ThemeId` is no longer an enum of three: it is an
+index into the package's own order (`themes/order.json`), the build script
+generates all twenty-two palettes, and `anatomy.rs` holds twenty-two rows.
+A new theme is a line in `order.json` and a row here — no match arm to
+update anywhere.
+
+What came with them:
+
+- **Three new border sets**, following `NOTCHED`: `CHAMFER_FALL` for dark
+  (top-right and bottom-left cut), `CHAMFER_RISE` for titanium (mirrored)
+  and `PHANTOM_BAR` for phantom, whose card has no frame at all — one heavy
+  bar down the left edge.
+- **A fourth reveal, `Words { ms, stagger_ms }`** [scope-127]: six
+  registers declare `--kp-word-stagger` (dark and titanium 28 ms, phantom
+  28, brutalism 60, shade-light 70, shade-dark 90) and reveal a headline
+  word by word. `Arrive` threw that away and made those six look like
+  light. Each word now eases in on its own clock, and at 16 colours a word
+  is simply there or not.
+- **The tab divider** stays `" │ "` where a theme draws its tabs as text,
+  and two spaces where it draws them as plates (brutalism, phantom, retro,
+  lapis, nostromo) [scope-127]. Nothing in the package states a tab
+  separator; this is the house answer, written down rather than assumed.
+
+Measured: 26 tests pass, clippy clean, the binary is 1,174,320 bytes
+(34,352 more than with three themes). `tests/render.rs` checks that all
+twenty-two have a name, an anatomy and a place in the order, that `t` walks
+the whole set and comes back, and that a word-staggered reveal lights its
+first word before its last.
+
 ## Recommendation
 
 Build the two crates in the next round, starting from this demo's shape. The split that works is the generated

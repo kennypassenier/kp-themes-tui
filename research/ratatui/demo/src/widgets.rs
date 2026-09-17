@@ -382,6 +382,25 @@ impl Widget for RevealText<'_> {
             _ => (th.c.card_foreground, f.text),
         };
         let style = Style::new().fg(fg).bg(th.c.card).add_modifier(th.a.title_modifier);
+        // A word-staggered reveal paints each word at its own opacity, so
+        // the line arrives left to right instead of as one plate.
+        if !f.words.is_empty() {
+            let spans: Vec<Span> = f
+                .words
+                .iter()
+                .map(|(word, opacity)| {
+                    let ink = match th.depth {
+                        // 16 colours cannot blend: a word is either there or not.
+                        ColorDepth::Ansi16 if *opacity < 0.5 => th.c.card,
+                        ColorDepth::Ansi16 => th.c.card_foreground,
+                        _ => th.depth.resolve(Role::Ink, mix(p.card, p.card_foreground, *opacity)),
+                    };
+                    Span::styled(word.clone(), style.fg(ink))
+                })
+                .collect();
+            Paragraph::new(Line::from(spans)).render(area, buf);
+            return;
+        }
         let mut spans = vec![Span::styled(text, style)];
         if f.caret.is_some() {
             spans.push(Span::styled(" ", Style::new().bg(th.c.foreground)));
