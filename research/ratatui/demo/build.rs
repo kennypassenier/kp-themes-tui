@@ -48,6 +48,13 @@ const FIELDS: &[(&str, &str, &str)] = &[
     ("selected", "selected", "Fill"),
     ("fx_signal", "fx-signal", "Signal"),
     ("fx_hot", "fx-hot", "Ink"),
+    // The dashboard: series colours, and the soft plate a pulse flashes.
+    ("chart_1", "chart-1", "Signal"),
+    ("chart_2", "chart-2", "Signal"),
+    ("chart_3", "chart-3", "Signal"),
+    ("chart_4", "chart-4", "Signal"),
+    ("chart_5", "chart-5", "Signal"),
+    ("warning", "warning", "Surface"),
 ];
 
 fn parse_hsl(v: &str) -> Option<(f64, f64, f64)> {

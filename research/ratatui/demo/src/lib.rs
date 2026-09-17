@@ -5,7 +5,10 @@ pub mod anatomy;
 pub mod app;
 pub mod color;
 pub mod config;
+pub mod dashboard;
 pub mod fx;
+pub mod live;
+pub mod logs;
 pub mod theme;
 pub mod widgets;
 

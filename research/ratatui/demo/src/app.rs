@@ -1,5 +1,5 @@
-//! Demo state and the one draw function. The terminal loop lives in
-//! `main.rs`; tests drive this with `TestBackend`.
+//! Demo state and the draw functions of both screens. The terminal loop
+//! lives in `main.rs`; tests drive this with `TestBackend`.
 
 use std::path::PathBuf;
 
@@ -14,6 +14,7 @@ use ratatui::{
 
 use crate::color::ColorDepth;
 use crate::config::Config;
+use crate::dashboard::{self, Dashboard};
 use crate::fx::{self, Motion};
 use crate::generated::PACKAGE_VERSION;
 use crate::theme::Theme;
@@ -44,7 +45,18 @@ const CONTENT: [(&str, &str, &str); 3] = [
 
 pub const BUTTONS: [(&str, ButtonKind); 2] = [("Deploy", ButtonKind::Primary), ("Roll back", ButtonKind::Destructive)];
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Screen {
+    /// Live machine stats, charts and the journal. The binary opens here.
+    Dashboard,
+    /// The first round's panels, tabs and buttons. `App::new` starts here,
+    /// so the first round's tests read the same frame they always did.
+    Components,
+}
+
 pub struct App {
+    pub screen: Screen,
+    pub dash: Dashboard,
     pub config: Config,
     pub depth: ColorDepth,
     pub theme: Theme,
@@ -94,6 +106,8 @@ impl App {
 
     pub fn new(config: Config, depth: ColorDepth, config_path: Option<PathBuf>) -> Self {
         App {
+            screen: Screen::Components,
+            dash: Dashboard::default(),
             config,
             depth,
             theme: Theme::new(config.theme, depth),
@@ -134,6 +148,7 @@ impl App {
 
     pub fn tick(&mut self, ms: u32) {
         self.reveal_ms = self.reveal_ms.saturating_add(ms);
+        self.dash.tick(ms);
         if let Some((i, left)) = self.pressed {
             self.pressed = left.checked_sub(ms).filter(|l| *l > 0).map(|l| (i, l));
         }
@@ -148,6 +163,14 @@ impl App {
             KeyCode::Char('t') => self.cycle_theme(),
             KeyCode::Char('m') => self.toggle_motion(),
             KeyCode::Char('r') => self.reveal_ms = 0,
+            KeyCode::Char('s') => {
+                self.screen = match self.screen {
+                    Screen::Dashboard => Screen::Components,
+                    Screen::Components => Screen::Dashboard,
+                };
+                self.reveal_ms = 0;
+            }
+            _ if self.screen == Screen::Dashboard => self.dashboard_key(key.code),
             KeyCode::Left => {
                 self.tab = (self.tab + TABS.len() - 1) % TABS.len();
                 self.reveal_ms = 0;
@@ -165,7 +188,36 @@ impl App {
         }
     }
 
+    fn dashboard_key(&mut self, code: KeyCode) {
+        let page = 10;
+        let logs = &mut self.dash.logs;
+        match code {
+            KeyCode::Char('p') => logs.toggle_pause(),
+            KeyCode::Char('f') => logs.cycle_filter(),
+            KeyCode::Up | KeyCode::Char('k') => logs.scroll_up(1),
+            KeyCode::Down | KeyCode::Char('j') => logs.scroll_down(1),
+            KeyCode::PageUp => logs.scroll_up(page),
+            KeyCode::PageDown => logs.scroll_down(page),
+            KeyCode::Home => logs.scroll_up(usize::MAX),
+            KeyCode::End => logs.follow(),
+            _ => {}
+        }
+    }
+
     pub fn draw(&self, frame: &mut Frame) {
+        if self.screen == Screen::Dashboard {
+            let header = format!(
+                "{PACKAGE_VERSION} · theme {} · colours {} · motion {} · {} fps",
+                self.theme.id.name(),
+                self.depth.label(),
+                if self.config.motion == Motion::Reduced { "reduced" } else { "full" },
+                self.dash.fps
+            );
+            let view =
+                dashboard::View { theme: &self.theme, motion: self.config.motion, reveal_ms: self.reveal_ms, header };
+            dashboard::draw(frame, &self.dash, &view);
+            return;
+        }
         let th = &self.theme;
         let buf_area = frame.area();
         frame.render_widget(Block::new().style(th.base()), buf_area);
@@ -246,8 +298,10 @@ impl App {
             frame.render_widget(Button::new(th, label).state(state), *cell);
         }
 
-        let keys =
-            format!(" t theme · ←/→ tab · Tab focus · Enter press · r replay · m motion · q quit   {}", self.message);
+        let keys = format!(
+            " s dashboard · t theme · ←/→ tab · Tab focus · Enter press · r replay · m motion · q quit   {}",
+            self.message
+        );
         frame.render_widget(
             Paragraph::new(keys).style(Style::new().bg(th.c.secondary).fg(th.c.secondary_foreground)),
             a.footer,

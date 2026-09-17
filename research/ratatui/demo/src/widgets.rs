@@ -21,11 +21,25 @@ pub struct Panel<'a> {
     theme: &'a Theme,
     title: &'a str,
     focused: bool,
+    /// Reveal the title in the theme's routine: elapsed ms and motion.
+    reveal: Option<(u32, Motion)>,
+    /// A right-aligned note in the top border (the log pane's state).
+    status: Option<Line<'static>>,
 }
 
 impl<'a> Panel<'a> {
     pub fn new(theme: &'a Theme, title: &'a str) -> Self {
-        Panel { theme, title, focused: false }
+        Panel { theme, title, focused: false, reveal: None, status: None }
+    }
+
+    pub fn reveal(mut self, elapsed_ms: u32, motion: Motion) -> Self {
+        self.reveal = Some((elapsed_ms, motion));
+        self
+    }
+
+    pub fn status(mut self, status: Line<'static>) -> Self {
+        self.status = Some(status);
+        self
     }
 
     pub fn focused(mut self, focused: bool) -> Self {
@@ -40,12 +54,28 @@ impl<'a> Panel<'a> {
         let title_style = Style::new()
             .fg(if self.focused { t.foreground } else { t.muted_foreground })
             .add_modifier(a.title_modifier);
-        Block::new()
+        let label = self.theme.label(self.title);
+        let title = match self.reveal {
+            None => Line::from(Span::styled(format!(" {label} "), title_style)),
+            Some((elapsed, motion)) => {
+                let p = self.theme.id.palette();
+                let ink = if self.focused { p.foreground } else { p.muted_foreground };
+                let mut spans = vec![Span::styled(" ", title_style)];
+                spans.extend(reveal_spans(self.theme, &label, elapsed, motion, ink, title_style));
+                spans.push(Span::styled(" ", title_style));
+                Line::from(spans)
+            }
+        };
+        let mut block = Block::new()
             .borders(Borders::ALL)
             .border_set(set)
             .border_style(Style::new().fg(line))
-            .title(Line::from(Span::styled(format!(" {} ", self.theme.label(self.title)), title_style)))
-            .style(Style::new().bg(t.card).fg(t.card_foreground))
+            .title(title)
+            .style(Style::new().bg(t.card).fg(t.card_foreground));
+        if let Some(status) = &self.status {
+            block = block.title_top(status.clone().right_aligned());
+        }
+        block
     }
 }
 
@@ -192,7 +222,38 @@ impl<'a> RevealText<'a> {
     }
 }
 
-fn mix(a: Rgb, b: Rgb, t: f32) -> Rgb {
+/// A text in the middle of its reveal, as spans: the routine's text, the
+/// arrive fade as a colour mix from the card towards `ink`, and the typing
+/// caret as a lit cell. Under reduced motion this is the finished text.
+pub fn reveal_spans(
+    th: &Theme,
+    text: &str,
+    elapsed_ms: u32,
+    motion: Motion,
+    ink: Rgb,
+    style: Style,
+) -> Vec<Span<'static>> {
+    let f = fx::frame(text, th.a.reveal, elapsed_ms, motion);
+    let n = f.text.chars().count();
+    let mut spans = match (th.depth, th.a.reveal) {
+        // 16 colours cannot blend: the fade is one step at half time.
+        (ColorDepth::Ansi16, Reveal::Arrive { .. }) if f.opacity < 0.5 => vec![Span::styled(" ".repeat(n), style)],
+        (_, Reveal::Arrive { .. }) if th.depth != ColorDepth::Ansi16 => {
+            let fg = th.depth.resolve(Role::Ink, mix(th.id.palette().card, ink, f.opacity));
+            vec![Span::styled(f.text, style.fg(fg))]
+        }
+        _ => vec![Span::styled(f.text, style)],
+    };
+    if f.caret.is_some() {
+        spans.push(Span::styled(" ", Style::new().bg(th.c.foreground)));
+        // Keep the title's width while it types, so the border does not jump.
+        let rest = text.chars().count().saturating_sub(n + 1);
+        spans.push(Span::styled(" ".repeat(rest), style));
+    }
+    spans
+}
+
+pub fn mix(a: Rgb, b: Rgb, t: f32) -> Rgb {
     let l = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
     Rgb(l(a.0, b.0), l(a.1, b.1), l(a.2, b.2))
 }

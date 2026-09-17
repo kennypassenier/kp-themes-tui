@@ -4,15 +4,17 @@ Kenny, 2026-09-17: "Eerst een Ratatui-onderzoek". Build a demo app with three th
 shape before anything is fixed.
 
 Demo: [`demo/`](demo/), a standalone Cargo project (ratatui 0.30.2, crossterm 0.29). This topic has no `demo.html`
-because the deliverable is a terminal app. `cargo run` starts it. `cargo run --example snapshot [-- 256|16]` prints
-one finished frame per theme. `cargo test` runs the checks, and `--features tachyonfx` swaps the reveal for the
-tachyonfx version. Keys: `t` theme, `←/→` tab, `Tab` focus, `Enter` press, `r` replay, `m` motion, `q` quit.
+because the deliverable is a terminal app. `cargo run` starts it on the live dashboard (see [Dashboard](#dashboard));
+`s` switches to the components screen. `cargo run --example snapshot [-- 256|16] [dashboard]` prints one finished
+frame per theme. `cargo test` runs the checks, and `--features tachyonfx` swaps the reveal for the tachyonfx version.
+Keys on the components screen: `t` theme, `←/→` tab, `Tab` focus, `Enter` press, `r` replay, `m` motion, `q` quit.
 
 **Measured** (2026-09-17, 16 cores, target directory outside the repository):
 
 - **Build:** `cargo build` succeeds. A clean `--release` build takes 6.22 s. Clippy and `cargo fmt --check` are clean
   with and without the feature.
-- **Tests:** 12 pass (4 parity, 8 render), or 13 with `--features tachyonfx`.
+- **Tests:** 12 pass (4 parity, 8 render), or 13 with `--features tachyonfx`. With the dashboard: 22 (10 more), 23
+  with the feature.
 - **Binary size** (`wc -c`, stripped): 791,632 bytes hand-written, 1,023,072 bytes with tachyonfx (+231,440, +29 %).
   Normal-dependency crates go from 86 to 95.
 - **Parity with the web:** all 300 generated values (87 palette fields and 213 authored tokens) equal Firefox's
@@ -85,6 +87,51 @@ local for its homelab-only effects and takes `FxLevel` from the crate.
 - **Shapes:** the `clip-path` notch (approximated with `◢`), radii below a cell, and line widths beyond light, heavy
   and double.
 - **Input states:** hover, unless mouse capture is on, and a true key release.
+
+## Dashboard
+
+Kenny, 2026-09-17, after running the first screen: "wel maar wat mager". The binary now opens on a live dashboard
+drawn through the same `&Theme`, so `t` repaints every chart, bar and log line on the next frame. Run it with
+`cargo run --release` (flags: `--fps N`, `--synthetic-logs`, `--reduced-motion`, `--screen components`).
+
+- **Machine stats, real** (`src/live.rs`): per-core and total CPU from `/proc/stat` (idle + iowait counted as idle),
+  memory from `MemAvailable`, load average, network rx/tx over every interface except `lo`, and disk read/write over
+  physical block devices only (partitions, zram, loop and dm are left out, so nothing is counted twice). Sampled
+  every 500 ms. **`/proc` directly, not `sysinfo`:** on Linux it reads the same files, its disk I/O is per mounted
+  filesystem (so it would need de-duplicating), and a probe with the same readings (sysinfo 0.39.6) was 167,840
+  bytes larger than an empty binary. Pick `sysinfo` when a consumer runs on macOS or Windows.
+- **Charts:** `Chart` with braille lines over a 60 s window: CPU total (`--chart-1`) plus load per core
+  (`--chart-5`), and network received (`--chart-3`) and sent (`--chart-4`) on a rounded auto-scale. Also a
+  `BarChart` of the cores (`--chart-1`, `--warning-foreground` from 70 %, `--destructive` from 90 %) and
+  `Sparkline`s for memory (`--chart-2`) and disk. Axis lines use `--border-strong` and labels `--muted-foreground`.
+  The palette gained six generated fields for this (`chart-1` to `chart-5`, `warning`), 35 per theme now.
+- **Logs:** `journalctl --follow --output=json` runs as a read-only child. On this machine it was readable without
+  privileges, starting with the last 300 lines. If it cannot start, or ends without a line, the pane switches to a
+  generated stream titled "synthetic, not real". The journal here writes about 20 lines a minute (1,181 in the last
+  hour), so `--synthetic-logs` shows a busier, labelled stream. Colours: timestamp `--muted-foreground`, host
+  `--border-strong`, unit `--primary`. Debug `--muted-foreground`, info `--info-foreground`, notice
+  `--success-foreground`, warning `--warning-foreground` in bold, error `--destructive` in bold, and critical bold on
+  a `--destructive` plate. Every line carries a fixed-width text tag (`DEBUG`…`CRIT`), because at 16 colours
+  terminal's info and success foregrounds both land on green. Keys: `p` pause (the view pins, and the title counts
+  new lines), `f` filter (all, then info and up, through critical, then back), `↑/↓ PgUp/PgDn Home` scroll (this
+  pins too), `End` follow. Control characters in messages become spaces.
+- **Effects:** panel titles reveal at start in the theme's own routine, 90 ms apart. CPU (70 %), memory (85 %) and
+  load (one per core) pulse when they cross upwards: two fading beats over 1.2 s on the soft `--warning` plate, or
+  inverse video at 16 colours. Over the threshold the value stays in `--warning-foreground`. Reduced motion shows
+  whole titles and no pulse.
+- **Frame budget:** draws at a steady 15 fps (`--fps`), sleeping in `event::poll` until the next frame or sample.
+  In a 140×45 pty, release build, 60 s: 901 frames, a mean draw of 0.34 ms, and **0.57 % of one core** for the demo
+  itself (0.34 s CPU, from its own `/proc/self/stat`; bash `time` over the demo and journalctl gives 0.320 s user
+  and 0.041 s sys). journalctl used under one clock tick. `--fps 60` costs 2.07 %. The run wrote 4,281 bytes a second,
+  with no full-screen clear (`\e[2J` 0 times): ratatui's buffer diff sends only changed cells, so nothing flickers.
+- **Size and tests:** stripped release binary 1,132,472 bytes, up 340,840 (+43 %) on the first screen. The added
+  normal dependency is `serde_json`, already a build dependency; it brings `itoa`, `memchr`, `serde_core` and `zmij`.
+  `tests/dashboard.rs` holds 10 headless tests. In every theme they check the `100%`, `-60s` and `now` labels in
+  `--muted-foreground`, the CPU and received series colours, and each severity's colour plus the timestamp, host and
+  unit roles on a log line. They also check that `t` changes the CPU series from formal's `--chart-1` to
+  cyberpunk's, that 16 colours leave no RGB and keep every tag, and that pause, filter and scroll behave. The rest
+  cover the pulse with and without motion, the title reveal, and the `/proc` and journal parsers on fixtures. None
+  reads `/proc` or spawns a process.
 
 ## Recommendation
 

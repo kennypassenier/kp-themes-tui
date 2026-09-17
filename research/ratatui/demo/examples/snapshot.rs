@@ -1,10 +1,23 @@
-//! `cargo run --example snapshot [-- truecolor|256|16]`: one finished frame
-//! per theme, rendered headless and printed with ANSI colours, so the three
-//! themes can be compared in one scroll without driving the app.
+//! `cargo run --example snapshot [-- truecolor|256|16] [dashboard]`: one
+//! finished frame per theme, rendered headless and printed with ANSI
+//! colours, so the three themes can be compared in one scroll without
+//! driving the app.
 
-use std::fmt::Write as _;
+use std::{
+    fmt::Write as _,
+    time::{Duration, Instant},
+};
 
-use kp_tui::{app::App, color::ColorDepth, config::Config, fx::Motion, theme::ThemeId};
+use kp_tui::{
+    app::{App, Screen},
+    color::ColorDepth,
+    config::Config,
+    dashboard::Dashboard,
+    fx::Motion,
+    live::Sampler,
+    logs::Feed,
+    theme::ThemeId,
+};
 use ratatui::{
     Terminal,
     backend::TestBackend,
@@ -37,11 +50,41 @@ fn sgr(c: Color, fg: bool) -> String {
 }
 
 fn main() {
-    let depth = std::env::args().nth(1).and_then(|a| ColorDepth::parse(&a)).unwrap_or(ColorDepth::TrueColor);
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let depth = args.iter().find_map(|a| ColorDepth::parse(a)).unwrap_or(ColorDepth::TrueColor);
+    // `dashboard`: read this machine for three seconds, then print the
+    // dashboard in every theme from the same data.
+    let dash = args.iter().any(|a| a == "dashboard");
+    let mut live = Dashboard::default();
+    if dash {
+        let mut feed = Feed::journal().unwrap_or_else(|_| Feed::synthetic("journalctl could not be started"));
+        let mut sampler = Sampler::new(feed.child_pid());
+        sampler.sample();
+        let start = Instant::now();
+        for _ in 0..6 {
+            std::thread::sleep(Duration::from_millis(500));
+            if let Some(s) = sampler.sample() {
+                live.push_sample(start.elapsed().as_secs_f64(), s);
+            }
+            feed.drain(&mut live.logs, 1000);
+        }
+        live.feed_live = feed.live();
+        live.feed_label = feed.label();
+    }
     for id in ThemeId::ALL {
-        let app = App::new(Config { theme: id, motion: Motion::Reduced }, depth, None);
-        let mut term = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        let mut app = App::new(Config { theme: id, motion: Motion::Reduced }, depth, None);
+        let size = if dash {
+            app.screen = Screen::Dashboard;
+            std::mem::swap(&mut app.dash, &mut live);
+            (120, 40)
+        } else {
+            (100, 24)
+        };
+        let mut term = Terminal::new(TestBackend::new(size.0, size.1)).unwrap();
         term.draw(|f| app.draw(f)).unwrap();
+        if dash {
+            std::mem::swap(&mut app.dash, &mut live);
+        }
         let buf = term.backend().buffer();
         let mut out = format!("\n{} ({})\n", id.name(), depth.label());
         for y in 0..buf.area.height {
