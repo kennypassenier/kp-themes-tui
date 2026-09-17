@@ -3,7 +3,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use kp_tui::{
-    anatomy::{ButtonFace, Reveal},
+    anatomy::Reveal,
     app::{App, areas},
     color::{ColorDepth, nearest_256},
     config::Config,
@@ -74,7 +74,7 @@ fn a_key_switches_the_theme_for_the_next_frame_and_persists_it() {
 }
 
 #[test]
-fn button_states_differ_by_plate_and_frame() {
+fn button_states_differ_by_plate_and_ring() {
     for id in ThemeId::ALL {
         let th = Theme::new(id, ColorDepth::TrueColor);
         let p = id.palette();
@@ -84,46 +84,63 @@ fn button_states_differ_by_plate_and_frame() {
             buf
         };
         let (rest, focus, pressed) = (draw(ButtonState::Rest), draw(ButtonState::Focus), draw(ButtonState::Pressed));
-        assert_eq!(rest[(1, 1)].bg, rgb(p.primary), "{}", id.name());
-        assert_eq!(focus[(1, 1)].bg, rgb(p.primary_hover), "{}", id.name());
-        assert_eq!(pressed[(1, 1)].bg, rgb(p.primary_active), "{}", id.name());
-        // The frame carries the focus ring, as a line where the theme draws
-        // a line and as a bar of colour where it draws a slab [scope-123].
-        let corner = &focus[(0, 0)];
-        match th.a.button_face {
-            ButtonFace::Line => assert_eq!(corner.fg, rgb(p.ring), "{}: framed focus", id.name()),
-            ButtonFace::Slab { .. } => assert_eq!(corner.bg, rgb(p.ring), "{}: slab focus", id.name()),
-            // A plate has no frame at all: the whole area is the plate.
-            ButtonFace::Plate => assert_eq!(corner.bg, rgb(p.primary_hover), "{}: plate focus", id.name()),
-        }
+        // The plate is the state's own colour, over the whole button.
+        assert_eq!(rest[(7, 0)].bg, rgb(p.primary), "{}: rest plate", id.name());
+        assert_eq!(focus[(7, 0)].bg, rgb(p.primary_hover), "{}: focus plate", id.name());
+        assert_eq!(pressed[(7, 0)].bg, rgb(p.primary_active), "{}: pressed plate", id.name());
+        // The focus ring is a strip along the plate's last row, and a
+        // pressed button does not carry it.
+        assert_eq!(focus[(7, 2)].bg, rgb(p.ring), "{}: the focus ring", id.name());
+        assert_eq!(rest[(7, 2)].bg, rgb(p.primary), "{}: no ring at rest", id.name());
+        assert_eq!(pressed[(7, 2)].bg, rgb(p.primary_active), "{}: no ring when pressed", id.name());
+        // Nothing is drawn with a line or a corner glyph.
+        let glyphs: String = (0..14).flat_map(|x| (0..3).map(move |y| (x, y))).map(|c| rest[c].symbol()).collect();
+        assert!(
+            !glyphs.contains('─') && !glyphs.contains('│') && !glyphs.contains('◢'),
+            "{}: a plate carries no frame glyphs: {glyphs}",
+            id.name()
+        );
     }
 }
 
 #[test]
-fn cyberpunks_button_is_a_slab_with_a_slit_and_a_cut_corner() {
+fn each_theme_ends_its_plate_its_own_way() {
+    let ends = |id: ThemeId| {
+        let th = Theme::new(id, ColorDepth::TrueColor);
+        let mut buf = Buffer::empty(Rect::new(0, 0, 14, 3));
+        Button::new(&th, "Deploy").render(buf.area, &mut buf);
+        let row: String = (0..14).map(|x| buf[(x, 1)].symbol()).collect();
+        (buf[(0, 1)].symbol().to_string(), buf[(0, 1)].bg, row)
+    };
+    // formal has a radius: the plate ends mid-cell, on the page's ground.
+    let (cap, bg, _) = ends(ThemeId::Formal);
+    assert_eq!(cap, "▐", "formal's soft cap");
+    assert_eq!(bg, rgb(ThemeId::Formal.palette().background), "the cap sits on the ground");
+    // cyberpunk's radius is 0: full cells, and the label is spaced caps.
+    let (cap, bg, row) = ends(ThemeId::Cyberpunk);
+    assert_eq!(cap, " ", "cyberpunk is square");
+    assert_eq!(bg, rgb(ThemeId::Cyberpunk.palette().primary), "square to the edge");
+    assert!(row.contains("D E P L O Y"), "{row}");
+    // terminal keeps its brackets.
+    let (_, _, row) = ends(ThemeId::Terminal);
+    assert!(row.contains("[ DEPLOY ]"), "{row}");
+}
+
+#[test]
+fn the_charge_sweep_crosses_a_focused_button_once() {
     let th = Theme::new(ThemeId::Cyberpunk, ColorDepth::TrueColor);
     let p = ThemeId::Cyberpunk.palette();
-    let draw = |state| {
+    let band = |progress: Option<f32>| {
         let mut buf = Buffer::empty(Rect::new(0, 0, 14, 3));
-        Button::new(&th, "Deploy").state(state).render(buf.area, &mut buf);
-        buf
+        Button::new(&th, "Deploy").state(ButtonState::Focus).charge(progress).render(buf.area, &mut buf);
+        (0..14).filter(|x| buf[(*x, 1)].bg == rgb(p.primary_foreground)).collect::<Vec<_>>()
     };
-    let rest = draw(ButtonState::Rest);
-    // The frame is a bar of colour one cell thick, not a line glyph.
-    assert_eq!(rest[(0, 0)].bg, rgb(p.primary), "the frame");
-    assert_eq!(rest[(0, 0)].symbol(), " ", "no line glyph");
-    assert_eq!(rest[(1, 1)].bg, rgb(p.primary), "the face");
-    // The slit crosses both ends of the frame at mid-height, and closes
-    // when the button is pressed.
-    assert_eq!(rest[(0, 1)].bg, rgb(p.background), "the slit, left");
-    assert_eq!(rest[(13, 1)].bg, rgb(p.background), "the slit, right");
-    assert_eq!(draw(ButtonState::Pressed)[(0, 1)].bg, rgb(p.ring), "the slit closes when pressed");
-    // The bottom-right corner is cut on the diagonal.
-    assert_eq!(rest[(13, 2)].symbol(), "◢", "the notch");
-    assert_eq!(rest[(13, 2)].bg, rgb(p.background), "the notch is cut out of the plate");
-    // `letter-spacing: 0.12em` on an uppercase label.
-    let row: String = (0..14).map(|x| rest[(x, 1)].symbol()).collect();
-    assert!(row.contains("D E P L O Y"), "{row}");
+    assert!(band(None).is_empty(), "no sweep without one");
+    let early = band(Some(0.25));
+    let late = band(Some(0.75));
+    assert!(!early.is_empty() && !late.is_empty(), "the band is on the face");
+    assert!(early.iter().max() < late.iter().max(), "the band travels: {early:?} then {late:?}");
+    assert!(band(Some(1.0)).iter().all(|x| *x > 10), "it leaves by the right edge");
 }
 
 #[test]
@@ -187,21 +204,4 @@ fn each_reveal_runs_its_own_routine() {
     let f = fx::frame(text, r, 100, Motion::Full);
     assert_eq!(f.text, text);
     assert!(f.opacity > 0.0 && f.opacity < 1.0);
-}
-
-#[test]
-fn the_charge_sweep_crosses_a_focused_button_once() {
-    let th = Theme::new(ThemeId::Cyberpunk, ColorDepth::TrueColor);
-    let p = ThemeId::Cyberpunk.palette();
-    let band = |progress: Option<f32>| {
-        let mut buf = Buffer::empty(Rect::new(0, 0, 14, 3));
-        Button::new(&th, "Deploy").state(ButtonState::Focus).charge(progress).render(buf.area, &mut buf);
-        (0..14).filter(|x| buf[(*x, 1)].bg == rgb(p.primary_foreground)).collect::<Vec<_>>()
-    };
-    assert!(band(None).is_empty(), "no sweep without one");
-    let early = band(Some(0.25));
-    let late = band(Some(0.75));
-    assert!(!early.is_empty() && !late.is_empty(), "the band is on the face");
-    assert!(early.iter().max() < late.iter().max(), "the band travels: {early:?} then {late:?}");
-    assert!(band(Some(1.0)).iter().all(|x| *x > 10), "it leaves by the right edge");
 }

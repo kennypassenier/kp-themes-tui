@@ -20,31 +20,30 @@ pub enum Reveal {
     Type { cps: f32 },
 }
 
-/// How a button is drawn. The web registers do not agree on a button being
-/// a framed box: cyberpunk paints a plate with a 2px frame, a slit through
-/// both sides and a cut corner, and terminal paints a bare plate in
-/// brackets. A one-cell line around a label is formal's button, not
-/// everyone's (Kenny, 2026-09-17: the buttons were "wat zwak", and he asked
-/// whether their geometry itself could carry the theme).
+/// How a button's plate ends. Every theme's button is a filled plate with
+/// its label centred on it — the shape a modern terminal interface uses,
+/// and what the registers draw on the web. What differs is the edge and
+/// what sits around the label (Kenny, 2026-09-17: a button must look
+/// "strak", not like drawn geometry).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ButtonFace {
-    /// A one-cell line in the theme's border glyphs, around the face.
-    Line,
-    /// A solid frame one cell thick around the face. `slit` interrupts both
-    /// side bars at mid-height, `notch` cuts the bottom-right corner on the
-    /// diagonal — the two marks cyberpunk's `.kp-button` carries.
-    Slab { slit: bool, notch: bool },
-    /// The plate alone, no frame: the label sits on the colour.
-    Plate,
+    /// Half-block caps, so the plate ends mid-cell: the nearest a cell grid
+    /// has to a corner radius.
+    Soft,
+    /// The plate runs to the full cell on both sides. A radius of 0.
+    Square,
+    /// Square, with the register's brackets around the label.
+    Bracket,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct Anatomy {
     pub border: border::Set<'static>,
     pub border_focus: border::Set<'static>,
-    /// The button's own frame, used by `ButtonFace::Line`.
+    /// The button's own frame. Kept for a theme that frames something else
+    /// the same way; the button itself is a plate.
     pub button_border: border::Set<'static>,
-    /// How the button is built, beyond its colours.
+    /// How the plate ends.
     pub button_face: ButtonFace,
     /// A space between the label's characters, for a register that sets
     /// `letter-spacing` on its buttons.
@@ -77,9 +76,10 @@ pub const FORMAL: Anatomy = Anatomy {
     // formal-register.css `.kp-button:focus-visible::after`.
     border_focus: border::DOUBLE,
     button_border: border::ROUNDED,
-    // formal-register.css `.kp-button`: a 1px border, a radius, no plate
-    // decoration. The restraint is the point, so this one stays a line.
-    button_face: ButtonFace::Line,
+    // formal-register.css `.kp-button--primary`: a filled plate, and
+    // `--radius: 0.375rem` rounds it. Half-block caps are that radius in a
+    // cell grid.
+    button_face: ButtonFace::Soft,
     button_spaced: false,
     // GUESS: Fraunces headings cannot exist in a terminal; bold is the only
     // weight channel left.
@@ -106,12 +106,11 @@ pub const CYBERPUNK: Anatomy = Anatomy {
     // a terminal has.
     border_focus: border::THICK,
     button_border: NOTCHED,
-    // cyberpunk-register.css `.kp-button`: the frame is the background
-    // colour of the element with the face inset 2px on all sides, the slit
-    // is a 10px band of ground through both ends at 50% height, and the
-    // clip-path cuts `--kp-button-notch` (14px) off the bottom-right corner.
-    // All three survive a cell grid.
-    button_face: ButtonFace::Slab { slit: true, notch: true },
+    // anatomy.md "The radius is 0": the plate keeps its full cells. The
+    // register's slit and its 14px corner cut were tried as glyphs on
+    // 2026-09-17 and thrown out — at one cell they read as drawn decoration
+    // rather than as a cut edge.
+    button_face: ButtonFace::Square,
     // `letter-spacing: 0.12em` on an uppercase label.
     button_spaced: true,
     title_modifier: Modifier::BOLD,
@@ -140,10 +139,9 @@ pub const TERMINAL: Anatomy = Anatomy {
     // keeps the line; the colour does the work, the glyph stays plain.
     border_focus: border::PLAIN,
     button_border: border::PLAIN,
-    // anatomy.md "the buttons are brackets and plates": a plate, and the
-    // brackets below are the button's marks. A line around it would be a
-    // second frame the register does not draw.
-    button_face: ButtonFace::Plate,
+    // anatomy.md "the buttons are brackets and plates": the plate, with the
+    // brackets below around the label. `--radius: 0`, so square.
+    button_face: ButtonFace::Bracket,
     button_spaced: false,
     // GUESS: the bloom on titles cannot exist; bold is the brightening a
     // terminal offers.

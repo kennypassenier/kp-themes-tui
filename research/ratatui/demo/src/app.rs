@@ -47,6 +47,12 @@ const CONTENT: [(&str, &str, &str); 3] = [
 /// button's face.
 pub const CHARGE_MS: u32 = 520;
 
+/// A button takes the width it asks for, at the start of the box it was
+/// given, and never more than the box holds.
+fn fit(slot: Rect, want: u16) -> Rect {
+    Rect { width: want.min(slot.width), ..slot }
+}
+
 pub const BUTTONS: [(&str, ButtonKind); 2] = [("Deploy", ButtonKind::Primary), ("Roll back", ButtonKind::Destructive)];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -297,7 +303,9 @@ impl App {
                 (true, Motion::Full) => self.charge_ms.map(|c| c as f32 / CHARGE_MS as f32),
                 _ => None,
             };
-            frame.render_widget(Button::new(th, label).kind(*kind).state(state).charge(charge), rows[i * 2]);
+            let button = Button::new(th, label).kind(*kind).state(state).charge(charge);
+            let slot = fit(rows[i * 2], button.width());
+            frame.render_widget(button, slot);
         }
 
         // Every button state at once, so no key has to be pressed to judge them.
@@ -313,7 +321,9 @@ impl App {
             ("Pressed", ButtonState::Pressed),
             ("Disabled", ButtonState::Disabled),
         ]) {
-            frame.render_widget(Button::new(th, label).state(state), *cell);
+            let button = Button::new(th, label).state(state);
+            let slot = fit(*cell, button.width());
+            frame.render_widget(button, slot);
         }
 
         let keys = format!(

@@ -124,7 +124,7 @@ drawn through the same `&Theme`, so `t` repaints every chart, bar and log line o
   itself (0.34 s CPU, from its own `/proc/self/stat`; bash `time` over the demo and journalctl gives 0.320 s user
   and 0.041 s sys). journalctl used under one clock tick. `--fps 60` costs 2.07 %. The run wrote 4,281 bytes a second,
   with no full-screen clear (`\e[2J` 0 times): ratatui's buffer diff sends only changed cells, so nothing flickers.
-- **Size and tests:** stripped release binary 1,139,728 bytes, up 348,096 (+44 %) on the first screen (7,256 of it the button geometry below). The added
+- **Size and tests:** stripped release binary 1,139,968 bytes, up 347,496 (+44 %) on the first screen. The added
   normal dependency is `serde_json`, already a build dependency; it brings `itoa`, `memchr`, `serde_core` and `zmij`.
   `tests/dashboard.rs` holds 10 headless tests, and `tests/render.rs` 10. In every theme they check the `100%`, `-60s` and `now` labels in
   `--muted-foreground`, the CPU and received series colours, and each severity's colour plus the timestamp, host and
@@ -133,40 +133,41 @@ drawn through the same `&Theme`, so `t` repaints every chart, bar and log line o
   cover the pulse with and without motion, the title reveal, and the `/proc` and journal parsers on fixtures. None
   reads `/proc` or spawns a process.
 
-## The button's geometry
+## The button's shape
 
-Kenny, 2026-09-17, after the dashboard: the buttons are "wat zwak", and he
-asked whether their geometry itself could carry a theme as stylistic as
-cyberpunk. A one-cell line around a label was formal's button applied to
-all three themes. `Anatomy::button_face` now says how a button is built:
+Kenny, 2026-09-17, twice. First: the buttons are "wat zwak", and can their
+geometry carry a theme as stylistic as cyberpunk? A first answer translated
+`.kp-button`'s slit and its 14px corner cut into cell glyphs. His verdict
+on that: "de vorm van de knoppen was echt heel slecht … ik wil moderne
+knoppen die er strak uitzien, niet amateuristische geometrie". He is right:
+at one cell, a `◢` and a broken frame read as drawn decoration, not as a
+cut edge.
 
-| Theme     | Face                      | Read from                                                                                                                        |
-| --------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| formal    | `Line`, rounded, one cell | `formal-register.css .kp-button`: a 1px border and a radius. The restraint is the point                                          |
-| cyberpunk | `Slab { slit, notch }`    | `cyberpunk-register.css .kp-button`: a frame with the face inset 2px, a 10px slit of ground through both ends, a 14px corner cut |
-| terminal  | `Plate`                   | `themes/terminal/anatomy.md` "the buttons are brackets and plates": the plate, and the brackets, and no second frame             |
+So a button is a **filled plate with its label centred on it**, and nothing
+else. No frame, no corner glyph, no line. What a theme varies:
 
-What that means in cells. The slab's frame is painted as a **background**
-one cell thick rather than a line glyph, so it reads as a bar of colour at
-any font size: `▁▁▁` never looks like 2px, a filled row does. The slit is
-the frame's left and right cell at mid-height painted in the ground, and it
-**closes when the button is pressed** — the one state the geometry carries
-itself (GUESS: the register moves the whole button by `--fx-lift`, which a
-cell grid cannot). The notch is `◢` in the frame colour on the ground, so
-the corner reads as cut away rather than drawn. cyberpunk's
-`letter-spacing: 0.12em` becomes a space between characters, dropped again
-when the label would not otherwise fit.
+| Theme     | Plate ends            | Read from                                                                                    |
+| --------- | --------------------- | -------------------------------------------------------------------------------------------- |
+| formal    | `Soft` — half blocks  | `--radius: 0.375rem`; `▐` and `▌` end the plate mid-cell, the nearest a grid has to a radius |
+| cyberpunk | `Square` — full cells | anatomy.md "The radius is 0", plus uppercase spaced caps from `letter-spacing: 0.12em`       |
+| terminal  | `Bracket`             | anatomy.md "the buttons are brackets and plates": square, `[ ]` around the label             |
 
-The charge sweep came with it: `animation: kp-charge 520ms` runs when a
-button takes focus, two cells wide, entering and leaving beyond both edges,
-painted behind the label as `z-index: -1` puts it. A cell grid has no
-alpha, so the band is the charge colour itself instead of the register's
-0.5-0.6 opacity. Reduced motion shows no sweep.
+Three more rules, all from the registers:
 
-Measured: `tests/render.rs` checks the frame bar, the slit on both ends,
-the slit closing under `Pressed`, the notch glyph and its ground, the
-spaced label, and that the sweep travels left to right and leaves by the
-right edge. Buttons cost 7,256 bytes of binary.
+- **A button takes the width it asks for** — the label plus three cells of
+  plate on either side (`padding-inline` is 1.4rem in cyberpunk, 0.75rem in
+  the base) — at the start of the box it is given, never the whole box. A
+  control that fills its container reads as a coloured row.
+- **The focus ring is a strip of `--ring` along the plate's last row.** A
+  pressed button does not carry it: it is down, so it is not lifted.
+- **The charge sweep** (`animation: kp-charge 520ms`) crosses the plate once
+  when a button takes focus, behind the label as `z-index: -1` puts it, and
+  stays away under reduced motion.
+
+Measured: `tests/render.rs` checks the plate colour per state in all three
+themes, the ring strip and its absence when pressed, that no frame or
+corner glyph is drawn at all, each theme's own plate end, the spaced caps,
+the brackets, and the sweep travelling left to right.
 
 ## Recommendation
 
