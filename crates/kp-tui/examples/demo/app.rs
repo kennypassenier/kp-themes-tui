@@ -25,6 +25,74 @@ use kp_tui::{
 
 pub const TABS: [&str; 3] = ["Overview", "Deployments", "Settings"];
 
+/// Tab and shift+tab walk the screens in this order: homelab's five
+/// rebuilt tabs in homelab's own order, its deploy window and splash,
+/// then the demo's own four.
+pub const ORDER: [Screen; 11] = [
+    Screen::Ops,
+    Screen::Fleet,
+    Screen::LogStream,
+    Screen::Doctor,
+    Screen::Settings,
+    Screen::Deploy,
+    Screen::Splash,
+    Screen::Dashboard,
+    Screen::Components,
+    Screen::Console,
+    Screen::Effects,
+];
+
+/// homelab's tabs by number (`model.rs`, `Tab::ALL`): dashboard, stacks,
+/// logs, doctor, settings. The sixth, the shell, is not rebuilt.
+pub const HOMELAB: [Screen; 5] = [
+    Screen::Ops,
+    Screen::Fleet,
+    Screen::LogStream,
+    Screen::Doctor,
+    Screen::Settings,
+];
+
+/// homelab's `azerty_tab_index`: the digit, or the symbol an azerty
+/// keyboard types on that key without shift.
+pub fn tab_index(c: char) -> Option<usize> {
+    match c {
+        '1' | '&' => Some(0),
+        '2' | 'é' => Some(1),
+        '3' | '"' => Some(2),
+        '4' | '\'' => Some(3),
+        '5' | '(' => Some(4),
+        '6' | '§' => Some(5),
+        _ => None,
+    }
+}
+
+/// The stack operations only a live host can carry out, by homelab's key.
+const HOST_OPS: [(char, &str); 10] = [
+    ('u', "update the host binary"),
+    ('D', "deploy"),
+    ('B', "backup"),
+    ('U', "update"),
+    ('g', "guards"),
+    ('A', "adopt"),
+    ('I', "install-native"),
+    ('c', "fleet check"),
+    ('i', "incidents"),
+    ('e', "park"),
+];
+
+/// The keys of the two stack screens, for the help overlay.
+pub const STACK_KEYS: [(&str, &str); 6] = [
+    ("↑↓ j k", "stack"),
+    ("p", "change plan, enter deploys"),
+    ("R", "restore, asks for the name"),
+    ("n", "new stack"),
+    ("r", "refresh"),
+    ("u D B U g A I c i e", "host operations"),
+];
+
+/// How long the status line stays up.
+const STATUS_MS: u32 = 4000;
+
 const CONTENT: [(&str, &str, &str); 3] = [
     (
         "Status",
@@ -134,8 +202,20 @@ pub struct App {
     pub stack_sel: usize,
     /// Which source the log screen's selector points at; 0 is all of them.
     pub source_sel: usize,
-    pub field_sel: usize,
-    pub asking: bool,
+    /// The settings screen's own state: what the host runs, what has been
+    /// edited, the row in hand, and the webhook while it is typed.
+    pub settings: crate::settings::Settings,
+    /// The deploy window's own state: the question, the scroll, the end.
+    pub deploy: crate::deploy::Deploy,
+    /// Where Esc or enter takes the deploy window back to.
+    pub back: Screen,
+    /// homelab's overlays, each of which holds the keyboard while it is up.
+    pub help_open: bool,
+    pub confirm: Option<crate::overlays::Confirm>,
+    pub plan: Option<crate::overlays::Plan>,
+    pub wizard: Option<crate::overlays::Wizard>,
+    /// What the last action did, and how long ago it said so.
+    pub status: Option<(String, u32)>,
     pub stream: kp_tui::logs::LogBuffer,
     /// Which step of the wizard the breadcrumb shows.
     pub step: usize,
@@ -190,12 +270,18 @@ impl App {
             alarm_ms: 0,
             ticker: Vec::new(),
             palette_open: false,
-            palette_query: String::from("st"),
+            palette_query: String::new(),
             palette_sel: 0,
             stack_sel: 1,
             source_sel: 0,
-            field_sel: 0,
-            asking: true,
+            settings: crate::settings::Settings::default(),
+            deploy: crate::deploy::Deploy::default(),
+            back: Screen::Ops,
+            help_open: false,
+            confirm: None,
+            plan: None,
+            wizard: None,
+            status: None,
             stream: crate::logstream::feed(),
             step: 2,
             config_path,
@@ -259,146 +345,344 @@ impl App {
                 format!("{} log lines", self.dash.logs.len()),
             ],
         };
+        self.deploy.tick(ms);
+        self.status = self
+            .status
+            .take()
+            .map(|(text, age)| (text, age.saturating_add(ms)))
+            .filter(|(_, age)| *age < STATUS_MS);
         if let Some((i, left)) = self.pressed {
             self.pressed = left.checked_sub(ms).filter(|l| *l > 0).map(|l| (i, l));
         }
     }
 
+    fn say(&mut self, text: impl Into<String>) {
+        self.status = Some((text.into(), 0));
+    }
+
+    fn go(&mut self, screen: Screen) {
+        self.screen = screen;
+        self.reveal_ms = 0;
+    }
+
+    /// The keys of the screen on show, for the help overlay.
+    pub fn screen_keys(&self) -> &'static [(&'static str, &'static str)] {
+        match self.screen {
+            Screen::Fleet | Screen::Ops => &STACK_KEYS,
+            Screen::Settings => &crate::settings::KEYS,
+            Screen::LogStream => &crate::logstream::KEYS,
+            Screen::Deploy => self.deploy.keys(),
+            Screen::Doctor => &crate::doctor::KEYS,
+            Screen::Console => CONSOLE_KEYS,
+            _ => &[],
+        }
+    }
+
+    /// One key, in homelab's order (`client/src/tui/model.rs`, `on_key`):
+    /// the splash, then whatever overlay holds the keyboard, then the keys
+    /// every screen shares, then the screen's own. On a rebuilt screen
+    /// every key does what it does in homelab; the demo's own keys sit
+    /// where homelab leaves room [fix-68].
     pub fn key(&mut self, key: KeyEvent) {
         if key.kind != KeyEventKind::Press {
             return;
         }
+        let code = key.code;
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        // homelab's splash gives way to any key at all.
+        if self.screen == Screen::Splash {
+            self.go(Screen::Ops);
+            return;
+        }
         if self.palette_open {
-            match key.code {
-                KeyCode::Esc => self.palette_open = false,
-                KeyCode::Char(c) => {
-                    self.palette_query.push(c);
-                    self.palette_sel = 0;
+            self.palette_key(code);
+            return;
+        }
+        // The deploy window has the keyboard while it is up: a waiting
+        // question first, then the feed, Esc and enter.
+        if self.screen == Screen::Deploy {
+            match self.deploy.key(code) {
+                crate::deploy::After::Stay => {}
+                crate::deploy::After::Close => {
+                    self.deploy = crate::deploy::Deploy::default();
+                    self.go(self.back);
                 }
-                KeyCode::Backspace => {
-                    self.palette_query.pop();
-                    self.palette_sel = 0;
+                crate::deploy::After::Background => {
+                    self.go(self.back);
+                    self.say("deploy keeps running — feed in the log stream");
                 }
-                KeyCode::Down => self.palette_sel += 1,
-                KeyCode::Up => self.palette_sel = self.palette_sel.saturating_sub(1),
-                KeyCode::Enter => self.palette_open = false,
-                _ => {}
             }
             return;
         }
-        // The log screen owns its arrows, its space and its l: every
-        // behaviour homelab's log tab has, and the level filter it does
-        // not [fix-65].
-        if self.screen == Screen::LogStream {
-            let sources = crate::logstream::sources().len();
-            let shift = key.modifiers.contains(KeyModifiers::SHIFT);
-            match key.code {
-                KeyCode::Left if shift => {
-                    self.stream.pan_by(-8);
-                    return;
-                }
-                KeyCode::Right if shift => {
-                    self.stream.pan_by(8);
-                    return;
-                }
-                KeyCode::Left => {
-                    self.source_sel = (self.source_sel + sources - 1) % sources;
-                    self.apply_source();
-                    return;
-                }
-                KeyCode::Right => {
-                    self.source_sel = (self.source_sel + 1) % sources;
-                    self.apply_source();
-                    return;
-                }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    self.stream.scroll_up(1);
-                    return;
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    self.stream.scroll_down(1);
-                    return;
-                }
-                KeyCode::Char(' ') => {
-                    self.stream.toggle_pause();
-                    return;
-                }
-                KeyCode::Char('l') => {
-                    self.stream.cycle_filter();
-                    return;
-                }
-                // Horizontal scrolling, on keys an azerty keyboard puts
-                // where a qwerty one does: h, j, k and l do not move
-                // between the two layouts, where the punctuation keys all
-                // do. Shift with the arrows does the same [fix-67].
-                KeyCode::Char('H') => {
-                    self.stream.pan_by(-8);
-                    return;
-                }
-                KeyCode::Char('L') => {
-                    self.stream.pan_by(8);
-                    return;
-                }
-                KeyCode::Char('G') | KeyCode::End => {
-                    self.stream.follow();
-                    return;
-                }
-                _ => {}
+        if self.help_open {
+            if matches!(code, KeyCode::Esc | KeyCode::Char('h') | KeyCode::Enter) {
+                self.help_open = false;
             }
+            return;
         }
-        match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => self.quit = true,
-            KeyCode::Char('t') => self.cycle_theme(),
-            KeyCode::Char('m') => self.toggle_motion(),
-            KeyCode::Char('r') => self.reveal_ms = 0,
-            // homelab re-runs its checks on `r` and on enter; the doctor's
-            // key hints promise both, so enter must not fall through to the
-            // components screen's buttons [fix-68].
-            KeyCode::Enter if self.screen == Screen::Doctor => self.reveal_ms = 0,
-            // The alarm strikes once, so it needs a key to strike again.
-            KeyCode::Char('a') => self.alarm_ms = 0,
-            KeyCode::Char('p') if self.screen == Screen::Console => {
-                self.palette_open = true;
+        if let Some(c) = self.confirm.as_mut() {
+            if let crate::overlays::Outcome::Closed(says) = c.key(code) {
+                self.confirm = None;
+                self.say(says);
+            }
+            return;
+        }
+        if let Some(w) = self.wizard.as_mut() {
+            if let crate::overlays::Outcome::Closed(says) = w.key(code) {
+                self.wizard = None;
+                self.say(says);
+            }
+            return;
+        }
+        if let Some(p) = self.plan.as_mut() {
+            match p.key(code) {
+                crate::overlays::Outcome::Open => {}
+                crate::overlays::Outcome::Closed(says) => {
+                    self.plan = None;
+                    self.say(says);
+                }
+                crate::overlays::Outcome::Deploy => {
+                    self.plan = None;
+                    self.deploy = crate::deploy::Deploy::default();
+                    self.back = self.screen;
+                    self.go(Screen::Deploy);
+                }
+            }
+            return;
+        }
+        // The webhook being typed swallows every key; digits would jump.
+        if self.screen == Screen::Settings && self.settings.typing() {
+            self.settings.key(code);
+            return;
+        }
+
+        // The keys every screen shares, as homelab's global match has them.
+        match code {
+            KeyCode::Char('q') if !ctrl => {
+                self.quit = true;
+                return;
+            }
+            KeyCode::Char('k') | KeyCode::Char('p') if ctrl => {
+                self.open_palette();
+                return;
+            }
+            KeyCode::F(2) => {
+                self.toggle_motion();
+                let now = match self.config.motion {
+                    Motion::Full => "full",
+                    Motion::Reduced => "reduced",
+                };
+                self.say(format!("effects → {now}"));
+                return;
+            }
+            KeyCode::Char('h') if !ctrl => {
+                self.help_open = true;
+                return;
+            }
+            KeyCode::Tab => {
+                let i = ORDER.iter().position(|s| *s == self.screen).unwrap_or(0);
+                self.go(ORDER[(i + 1) % ORDER.len()]);
+                return;
+            }
+            KeyCode::BackTab => {
+                let i = ORDER.iter().position(|s| *s == self.screen).unwrap_or(0);
+                self.go(ORDER[(i + ORDER.len() - 1) % ORDER.len()]);
+                return;
+            }
+            // homelab's own tab order, on the digits and on the symbols an
+            // azerty keyboard types without shift. Its sixth tab, the
+            // shell, is not rebuilt.
+            KeyCode::Char(c) if !ctrl => {
+                if let Some(i) = tab_index(c) {
+                    if let Some(screen) = HOMELAB.get(i) {
+                        self.go(*screen);
+                    }
+                    return;
+                }
+            }
+            KeyCode::Esc => {
+                self.quit = true;
+                return;
+            }
+            _ => {}
+        }
+        if ctrl {
+            return;
+        }
+        // The theme is the demo's own key, on a letter homelab leaves free.
+        if code == KeyCode::Char('t') {
+            self.cycle_theme();
+            return;
+        }
+        match self.screen {
+            Screen::Settings => {
+                if let Some(says) = self.settings.key(code) {
+                    self.reveal_ms = 0;
+                    self.say(says);
+                }
+            }
+            Screen::Fleet | Screen::Ops => self.stack_key(code),
+            Screen::LogStream => self.log_key(key),
+            // homelab runs the checks again on r and on enter.
+            Screen::Doctor => {
+                if matches!(code, KeyCode::Char('r') | KeyCode::Enter) {
+                    self.reveal_ms = 0;
+                }
+            }
+            Screen::Dashboard => match code {
+                KeyCode::Char('r') => self.reveal_ms = 0,
+                _ => self.dashboard_key(code),
+            },
+            Screen::Console => match code {
+                KeyCode::Char('p') => self.open_palette(),
+                KeyCode::Char('n') => self.step = (self.step + 1) % WIZARD.len(),
+                KeyCode::Char('a') => self.alarm_ms = 0,
+                KeyCode::Char('r') => self.reveal_ms = 0,
+                _ => {}
+            },
+            Screen::Effects => match code {
+                // The alarm strikes once, so it needs a key to strike again.
+                KeyCode::Char('a') => self.alarm_ms = 0,
+                KeyCode::Char('r') => self.reveal_ms = 0,
+                _ => {}
+            },
+            Screen::Components => self.components_key(code),
+            Screen::Deploy | Screen::Splash => {}
+        }
+    }
+
+    fn open_palette(&mut self) {
+        self.palette_open = true;
+        self.palette_query.clear();
+        self.palette_sel = 0;
+    }
+
+    /// The palette's keys, as homelab's `palette_key`: typing filters,
+    /// the arrows walk what matches and wrap, enter runs it.
+    fn palette_key(&mut self, code: KeyCode) {
+        let labels = crate::overlays::palette_labels();
+        let found: Vec<usize> = kp_tui::CommandPalette::new(
+            &self.theme,
+            &self.palette_query,
+            &labels,
+            self.palette_sel,
+        )
+        .matches()
+        .into_iter()
+        .map(|(i, _)| i)
+        .collect();
+        let n = found.len();
+        match code {
+            KeyCode::Esc => self.palette_open = false,
+            KeyCode::Char(c) => {
+                self.palette_query.push(c);
                 self.palette_sel = 0;
             }
-            KeyCode::Down | KeyCode::Char('j') if self.screen == Screen::Settings => {
-                self.field_sel = (self.field_sel + 1) % crate::settings::ROWS;
+            KeyCode::Backspace => {
+                self.palette_query.pop();
+                self.palette_sel = 0;
             }
-            KeyCode::Up | KeyCode::Char('k') if self.screen == Screen::Settings => {
-                self.field_sel =
-                    (self.field_sel + crate::settings::ROWS - 1) % crate::settings::ROWS;
+            KeyCode::Down if n > 0 => self.palette_sel = (self.palette_sel + 1) % n,
+            KeyCode::Up if n > 0 => self.palette_sel = (self.palette_sel + n - 1) % n,
+            KeyCode::Enter => {
+                self.palette_open = false;
+                if let Some(&i) = found.get(self.palette_sel) {
+                    self.run(crate::overlays::PALETTE[i].1);
+                }
             }
-            KeyCode::Down | KeyCode::Char('j')
-                if matches!(self.screen, Screen::Fleet | Screen::Ops) =>
-            {
-                self.stack_sel = (self.stack_sel + 1) % crate::fleet::FLEET.len();
+            _ => {}
+        }
+    }
+
+    /// What a palette entry does, as homelab's `run_action`.
+    fn run(&mut self, id: &str) {
+        match id {
+            "tab.dashboard" => self.go(Screen::Ops),
+            "tab.stacks" => self.go(Screen::Fleet),
+            "tab.logs" => self.go(Screen::LogStream),
+            "tab.doctor" => self.go(Screen::Doctor),
+            "tab.settings" => self.go(Screen::Settings),
+            "tab.shell" => {
+                self.say("the shell tab is not rebuilt — it is a terminal in a terminal")
             }
-            KeyCode::Up | KeyCode::Char('k')
-                if matches!(self.screen, Screen::Fleet | Screen::Ops) =>
-            {
-                self.stack_sel =
-                    (self.stack_sel + crate::fleet::FLEET.len() - 1) % crate::fleet::FLEET.len();
+            "refresh" => self.reveal_ms = 0,
+            "doctor" => self.go(Screen::Doctor),
+            "op.restore" => self.confirm = Some(crate::overlays::Confirm::new(self.stack_sel)),
+            "fx" => self.key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE)),
+            "help" => self.help_open = true,
+            "quit" => self.quit = true,
+            op => {
+                let name = op.trim_start_matches("op.");
+                self.say(format!("{name}: needs a live host — the demo has none"));
             }
-            KeyCode::Char('n') if self.screen == Screen::Console => {
-                self.step = (self.step + 1) % WIZARD.len();
+        }
+    }
+
+    /// homelab's stacks and dashboard tabs share one handler, and so do
+    /// their two rebuilds.
+    fn stack_key(&mut self, code: KeyCode) {
+        let n = crate::fleet::FLEET.len();
+        match code {
+            KeyCode::Down | KeyCode::Char('j') => self.stack_sel = (self.stack_sel + 1) % n,
+            KeyCode::Up | KeyCode::Char('k') => self.stack_sel = (self.stack_sel + n - 1) % n,
+            KeyCode::Char('r') => self.reveal_ms = 0,
+            KeyCode::Char('R') => {
+                self.confirm = Some(crate::overlays::Confirm::new(self.stack_sel));
             }
-            KeyCode::Char('s') => {
-                self.screen = match self.screen {
-                    Screen::Dashboard => Screen::Components,
-                    Screen::Components => Screen::Console,
-                    Screen::Console => Screen::Effects,
-                    Screen::Effects => Screen::Fleet,
-                    Screen::Fleet => Screen::Ops,
-                    Screen::Ops => Screen::Settings,
-                    Screen::Settings => Screen::LogStream,
-                    Screen::LogStream => Screen::Deploy,
-                    Screen::Deploy => Screen::Doctor,
-                    Screen::Doctor => Screen::Splash,
-                    Screen::Splash => Screen::Dashboard,
-                };
-                self.reveal_ms = 0;
+            KeyCode::Char('p') => {
+                self.plan = Some(crate::overlays::Plan {
+                    stack: self.stack_sel,
+                });
             }
-            _ if self.screen == Screen::Dashboard => self.dashboard_key(key.code),
+            KeyCode::Char('n') => self.wizard = Some(crate::overlays::Wizard::default()),
+            KeyCode::Char(c) => {
+                if let Some((_, op)) = HOST_OPS.iter().find(|(k, _)| *k == c) {
+                    self.say(format!("{op}: needs a live host — the demo has none"));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The log screen owns its arrows, its space and its l: every
+    /// behaviour homelab's log tab has, and the level filter it does
+    /// not [fix-65].
+    fn log_key(&mut self, key: KeyEvent) {
+        let sources = crate::logstream::sources().len();
+        let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+        match key.code {
+            KeyCode::Left if shift => self.stream.pan_by(-8),
+            KeyCode::Right if shift => self.stream.pan_by(8),
+            KeyCode::Left => {
+                self.source_sel = (self.source_sel + sources - 1) % sources;
+                self.apply_source();
+            }
+            KeyCode::Right => {
+                self.source_sel = (self.source_sel + 1) % sources;
+                self.apply_source();
+            }
+            KeyCode::Up | KeyCode::Char('k') => self.stream.scroll_up(1),
+            KeyCode::Down | KeyCode::Char('j') => self.stream.scroll_down(1),
+            KeyCode::Char(' ') => self.stream.toggle_pause(),
+            KeyCode::Char('l') => self.stream.cycle_filter(),
+            // Horizontal scrolling, on keys an azerty keyboard puts where a
+            // qwerty one does: h, j, k and l do not move between the two
+            // layouts, where the punctuation keys all do. Shift with the
+            // arrows does the same [fix-67].
+            KeyCode::Char('H') => self.stream.pan_by(-8),
+            KeyCode::Char('L') => self.stream.pan_by(8),
+            KeyCode::Char('G') | KeyCode::End => self.stream.follow(),
+            KeyCode::Char('r') => self.reveal_ms = 0,
+            _ => {}
+        }
+    }
+
+    /// The first round's components screen: its tabs, its two buttons and
+    /// the alarm. Its focus moves on `f` now that tab changes the screen.
+    fn components_key(&mut self, code: KeyCode) {
+        match code {
+            KeyCode::Char('a') => self.alarm_ms = 0,
+            KeyCode::Char('r') => self.reveal_ms = 0,
             KeyCode::Left => {
                 self.tab = (self.tab + TABS.len() - 1) % TABS.len();
                 self.reveal_ms = 0;
@@ -407,7 +691,7 @@ impl App {
                 self.tab = (self.tab + 1) % TABS.len();
                 self.reveal_ms = 0;
             }
-            KeyCode::Tab | KeyCode::BackTab => {
+            KeyCode::Char('f') => {
                 self.focus = (self.focus + 1) % BUTTONS.len();
                 self.charge_ms = Some(0);
             }
@@ -435,7 +719,36 @@ impl App {
         }
     }
 
+    /// The screen, then whatever homelab would draw over it.
     pub fn draw(&self, frame: &mut Frame) {
+        self.draw_screen(frame);
+        let th = &self.theme;
+        let blink = self.reveal_ms / 33;
+        if let Some(p) = &self.plan {
+            p.draw(frame, th);
+        }
+        if let Some(w) = &self.wizard {
+            w.draw(frame, th, blink);
+        }
+        if let Some(c) = &self.confirm {
+            c.draw(frame, th, blink);
+        }
+        if self.help_open {
+            crate::overlays::draw_help(frame, th, self.screen_keys());
+        }
+        if self.palette_open {
+            let labels = crate::overlays::palette_labels();
+            CommandPalette::new(th, &self.palette_query, &labels, self.palette_sel)
+                .size((52, 12))
+                .blink(self.reveal_ms)
+                .render_over(frame.area(), frame.buffer_mut());
+        }
+        if let Some((text, _)) = &self.status {
+            crate::overlays::draw_status(frame, th, text);
+        }
+    }
+
+    fn draw_screen(&self, frame: &mut Frame) {
         if self.screen == Screen::Dashboard {
             let header = format!(
                 "{PACKAGE_VERSION} · theme {} · colours {} · motion {} · {} fps",
@@ -492,7 +805,7 @@ impl App {
             crate::settings::draw(
                 frame,
                 &self.theme,
-                self.field_sel,
+                &self.settings,
                 self.reveal_ms,
                 self.config.motion,
             );
@@ -540,7 +853,7 @@ impl App {
             crate::deploy::draw(
                 frame,
                 &self.theme,
-                self.asking,
+                &self.deploy,
                 self.reveal_ms,
                 self.config.motion,
             );
@@ -610,7 +923,7 @@ impl App {
         let col = field.x + (prompt.chars().count() + 2 + value.len()) as u16;
         frame.set_cursor_position((col.min(field.right().saturating_sub(1)), field.y));
 
-        // Actions panel: focus follows Tab, Enter presses.
+        // Actions panel: focus follows f, Enter presses.
         let panel = Panel::new(th, "Actions").focused(true);
         let inner = panel.block().inner(a.actions);
         frame.render_widget(panel, a.actions);
@@ -658,7 +971,7 @@ impl App {
         }
 
         let keys = format!(
-            " s dashboard · t theme · ←/→ tab · Tab focus · Enter press · r replay · m motion · q quit   {}",
+            " tab screen · t theme · ←/→ tab · f focus · Enter press · r replay · F2 motion · h help · q quit   {}",
             self.message
         );
         frame.render_widget(
@@ -785,14 +1098,6 @@ impl App {
         );
 
         frame.render_widget(KeyHints::new(th, CONSOLE_KEYS), rows[4]);
-
-        if self.palette_open {
-            CommandPalette::new(th, &self.palette_query, &COMMANDS, self.palette_sel)
-                .size((46, 10))
-                .blink(self.reveal_ms)
-                .render_over(screen, frame.buffer_mut());
-            return;
-        }
 
         // And a dialog over all of it, as a restore would be.
         let popup = Popup::new(th, "Restore backup", (52, 7)).kind(PopupKind::Danger);
@@ -982,9 +1287,9 @@ fn texture_note(th: &Theme) -> String {
 
 const EFFECT_KEYS: &[(&str, &str)] = &[
     ("a", "alarm"),
-    ("s", "screen"),
+    ("tab", "screen"),
     ("t", "theme"),
-    ("m", "motion"),
+    ("F2", "motion"),
     ("q", "quit"),
 ];
 
@@ -1001,40 +1306,273 @@ const STACKS: [(&str, &str); 5] = [
     ("dns", "1 container"),
 ];
 
-const COMMANDS: [&str; 8] = [
-    "Deploy stack",
-    "Restart stack",
-    "Roll back to 2.3",
-    "Open logs",
-    "Stop stack",
-    "Prune images",
-    "Restore backup",
-    "Switch theme",
-];
-
 /// One keymap: the footer and the overlay both read this.
 const CONSOLE_KEYS: &[(&str, &str)] = &[
     ("p", "palette"),
     ("n", "step"),
-    ("s", "screen"),
+    ("tab", "screen"),
     ("t", "theme"),
-    ("m", "motion"),
-    ("Esc", "close"),
+    ("F2", "effects"),
+    ("h", "help"),
     ("q", "quit"),
 ];
 
 #[cfg(test)]
 mod tests {
+    //! Every key homelab binds on a rebuilt screen, pressed here and read
+    //! back, so the key inventory in docs/HOMELAB_PROOF.md is code and not
+    //! a promise [fix-68].
     use super::*;
+
+    fn app(screen: Screen) -> App {
+        let mut app = App::new(Config::default(), ColorDepth::TrueColor, None);
+        app.screen = screen;
+        app
+    }
+
+    fn press(app: &mut App, code: KeyCode) {
+        app.key(KeyEvent::new(code, KeyModifiers::NONE));
+    }
+
+    fn typed(app: &mut App, text: &str) {
+        for c in text.chars() {
+            press(app, KeyCode::Char(c));
+        }
+    }
+
+    fn status(app: &App) -> &str {
+        app.status.as_ref().map(|(s, _)| s.as_str()).unwrap_or("")
+    }
 
     #[test]
     fn enter_on_the_doctor_runs_the_checks_again() {
-        let mut app = App::new(Config::default(), ColorDepth::TrueColor, None);
-        app.screen = Screen::Doctor;
+        let mut app = app(Screen::Doctor);
         app.tick(1_000);
-        app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        press(&mut app, KeyCode::Enter);
         assert_eq!(app.reveal_ms, 0, "enter did not re-run the checks");
         assert!(app.pressed.is_none(), "enter pressed a components button");
         assert!(app.message.is_empty());
+    }
+
+    #[test]
+    fn any_key_leaves_the_splash_for_the_dashboard() {
+        let mut app = app(Screen::Splash);
+        press(&mut app, KeyCode::Char('x'));
+        assert_eq!(app.screen, Screen::Ops);
+        assert!(!app.quit);
+    }
+
+    #[test]
+    fn tab_digits_and_azerty_symbols_walk_homelabs_order() {
+        let mut app = app(Screen::Ops);
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(app.screen, Screen::Fleet);
+        press(&mut app, KeyCode::BackTab);
+        assert_eq!(app.screen, Screen::Ops);
+        for (key, screen) in [
+            ('3', Screen::LogStream),
+            ('é', Screen::Fleet),
+            ('\'', Screen::Doctor),
+            ('5', Screen::Settings),
+            ('&', Screen::Ops),
+        ] {
+            press(&mut app, KeyCode::Char(key));
+            assert_eq!(app.screen, screen, "{key}");
+        }
+    }
+
+    #[test]
+    fn a_waiting_question_swallows_every_key_but_its_two_answers() {
+        let mut app = app(Screen::Deploy);
+        app.back = Screen::Fleet;
+        for code in [KeyCode::Char('q'), KeyCode::Up, KeyCode::Esc, KeyCode::Tab] {
+            press(&mut app, code);
+            assert_eq!(app.screen, Screen::Deploy);
+            assert!(!app.quit);
+        }
+        press(&mut app, KeyCode::Char('a'));
+        assert_eq!(app.deploy.allowed, Some(true));
+        assert_eq!(
+            app.screen,
+            Screen::Deploy,
+            "the answer leaves the window up"
+        );
+    }
+
+    #[test]
+    fn the_deploy_window_scrolls_backgrounds_and_closes() {
+        let mut app = app(Screen::Deploy);
+        app.back = Screen::Fleet;
+        press(&mut app, KeyCode::Char('s'));
+        press(&mut app, KeyCode::Up);
+        press(&mut app, KeyCode::Up);
+        assert_eq!(app.deploy.scroll, 2);
+        press(&mut app, KeyCode::Down);
+        assert_eq!(app.deploy.scroll, 1);
+        // Running: Esc sends it to the background and says so.
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.screen, Screen::Fleet);
+        assert!(status(&app).contains("keeps running"));
+        assert!(!app.quit);
+        // It runs on behind the screen, and enter closes it once done.
+        app.tick(crate::deploy::FINISH_MS);
+        app.go(Screen::Deploy);
+        assert!(app.deploy.done);
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.screen, Screen::Fleet);
+        assert!(app.deploy.asking, "a closed deploy starts over");
+    }
+
+    #[test]
+    fn settings_steps_values_adds_and_deletes_tiers() {
+        let mut app = app(Screen::Settings);
+        let alarm = app.alarm_ms;
+        press(&mut app, KeyCode::Right);
+        assert_eq!(app.settings.edit.backup_hour, Some(4));
+        press(&mut app, KeyCode::Char('a'));
+        assert_eq!(app.settings.edit.tiers.len(), 4, "a adds a tier");
+        assert_eq!(app.alarm_ms, alarm, "a is not the alarm here");
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Right);
+        assert_eq!(app.settings.edit.tiers[0].every_days, 2);
+        press(&mut app, KeyCode::Char('d'));
+        assert_eq!(
+            app.settings.edit.tiers.len(),
+            3,
+            "d deletes the tier in hand"
+        );
+    }
+
+    #[test]
+    fn the_webhook_is_typed_and_digits_do_not_jump() {
+        let mut app = app(Screen::Settings);
+        let last = app.settings.rows() - 1;
+        for _ in 0..last {
+            press(&mut app, KeyCode::Down);
+        }
+        press(&mut app, KeyCode::Enter);
+        assert!(app.settings.typing());
+        typed(&mut app, "https://hook/1");
+        assert_eq!(app.screen, Screen::Settings, "a digit switched the screen");
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.settings.edit.webhook.as_deref(), Some("https://hook/1"));
+    }
+
+    #[test]
+    fn capital_s_saves_and_r_reloads() {
+        let mut app = app(Screen::Settings);
+        assert_ne!(app.settings.host, app.settings.edit);
+        press(&mut app, KeyCode::Char('S'));
+        assert_eq!(app.settings.host, app.settings.edit);
+        assert_eq!(app.screen, Screen::Settings, "S left the screen");
+        press(&mut app, KeyCode::Right);
+        press(&mut app, KeyCode::Char('r'));
+        assert_eq!(
+            app.settings.host, app.settings.edit,
+            "r reads the host back"
+        );
+    }
+
+    #[test]
+    fn a_plan_is_shown_first_and_enter_runs_the_deploy() {
+        let mut app = app(Screen::Fleet);
+        press(&mut app, KeyCode::Char('p'));
+        assert!(app.plan.is_some());
+        press(&mut app, KeyCode::Esc);
+        assert!(app.plan.is_none());
+        assert!(!app.quit, "Esc on a plan quit the demo");
+        press(&mut app, KeyCode::Char('p'));
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.screen, Screen::Deploy);
+        assert_eq!(app.back, Screen::Fleet);
+    }
+
+    #[test]
+    fn a_restore_asks_for_the_stack_name() {
+        let mut app = app(Screen::Ops);
+        app.stack_sel = 0; // media
+        press(&mut app, KeyCode::Char('R'));
+        typed(&mut app, "medi");
+        press(&mut app, KeyCode::Enter);
+        assert!(app.confirm.is_none());
+        assert!(status(&app).contains("does not match"));
+        press(&mut app, KeyCode::Char('R'));
+        typed(&mut app, "media");
+        press(&mut app, KeyCode::Enter);
+        assert!(status(&app).contains("live host"));
+    }
+
+    #[test]
+    fn the_wizard_walks_its_five_steps() {
+        let mut app = app(Screen::Fleet);
+        press(&mut app, KeyCode::Char('n'));
+        press(&mut app, KeyCode::Enter); // preset: media
+        press(&mut app, KeyCode::Backspace);
+        typed(&mut app, "2");
+        press(&mut app, KeyCode::Enter); // name: medi2
+        let w = app.wizard.as_ref().expect("wizard open");
+        assert_eq!((w.step, w.name.as_str(), w.ram), (2, "medi2", 4096));
+        press(&mut app, KeyCode::Right);
+        assert_eq!(app.wizard.as_ref().map(|w| w.ram), Some(5120));
+        press(&mut app, KeyCode::Enter); // storage
+        press(&mut app, KeyCode::Char(' '));
+        assert_eq!(app.wizard.as_ref().map(|w| w.no_data[0]), Some(true));
+        press(&mut app, KeyCode::Enter); // review
+        press(&mut app, KeyCode::Enter);
+        assert!(app.wizard.is_none());
+        assert!(status(&app).contains("medi2"));
+    }
+
+    #[test]
+    fn the_palette_opens_anywhere_and_enter_runs_the_action() {
+        let mut app = app(Screen::Settings);
+        app.key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL));
+        assert!(app.palette_open);
+        typed(&mut app, "go: doc");
+        press(&mut app, KeyCode::Enter);
+        assert!(!app.palette_open);
+        assert_eq!(app.screen, Screen::Doctor);
+        app.key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
+        press(&mut app, KeyCode::Up);
+        assert_eq!(
+            app.palette_sel,
+            crate::overlays::PALETTE.len() - 1,
+            "up wraps"
+        );
+    }
+
+    #[test]
+    fn h_opens_the_help_and_esc_closes_it_without_quitting() {
+        let mut app = app(Screen::Fleet);
+        press(&mut app, KeyCode::Char('h'));
+        assert!(app.help_open);
+        press(&mut app, KeyCode::Char('x'));
+        assert!(app.help_open);
+        press(&mut app, KeyCode::Esc);
+        assert!(!app.help_open);
+        assert!(!app.quit);
+    }
+
+    #[test]
+    fn f2_turns_the_effects_down_and_up() {
+        let mut app = app(Screen::Ops);
+        let before = app.config.motion;
+        press(&mut app, KeyCode::F(2));
+        assert_ne!(app.config.motion, before);
+        assert!(status(&app).starts_with("effects"));
+    }
+
+    #[test]
+    fn overlays_draw_over_every_screen() {
+        use ratatui::{Terminal, backend::TestBackend};
+        let mut app = app(Screen::Fleet);
+        app.help_open = true;
+        app.plan = Some(crate::overlays::Plan { stack: 0 });
+        app.wizard = Some(crate::overlays::Wizard::default());
+        app.confirm = Some(crate::overlays::Confirm::new(0));
+        app.palette_open = true;
+        app.status = Some(("saved".into(), 0));
+        let mut term = Terminal::new(TestBackend::new(100, 30)).expect("terminal");
+        term.draw(|f| app.draw(f)).expect("draw");
     }
 }

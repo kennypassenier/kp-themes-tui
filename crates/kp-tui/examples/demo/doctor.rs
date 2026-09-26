@@ -44,7 +44,7 @@ pub const REPORT: [&str; 14] = [
     "  [Ok]   the other three match their manifest",
 ];
 
-const KEYS: [(&str, &str); 3] = [
+pub const KEYS: [(&str, &str); 3] = [
     ("r", "run the checks again"),
     ("enter", "the same"),
     ("q", "quit"),

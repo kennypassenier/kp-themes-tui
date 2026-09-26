@@ -25,6 +25,7 @@ mod doctor;
 mod fleet;
 mod logstream;
 mod ops;
+mod overlays;
 mod settings;
 mod splash;
 

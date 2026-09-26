@@ -484,67 +484,77 @@ place on azerty as on qwerty [fix-67].
 fix-65's fallback, applied because its measurement failed at the sixth
 screen [fix-68]: every key homelab's client binds
 (`client/src/tui/model.rs`, "H" below), read per tab against the demo's
-`examples/demo/app.rs`. ✓ bound and doing the same thing · ✗ missing ·
-**host** only means something against a live host (it sends a command),
-so the demo has nothing to do with it · **footer** marks a key the
-demo's own footer promises. A rebuild is not called done until every ✗
-row is ticked or struck by decision.
+`examples/demo/app.rs`. ✓ bound and doing the same thing · **host** only
+means something against a live host (it sends a command), so the demo
+says so in its status line and does nothing else.
 
-The demo's own keys sit on top of all screens: `s` cycles the screens,
-`t` the theme, `m` the motion, `r` replays the reveal, `a` the alarm,
-`q`/Esc quit. Where one of those is a key homelab uses on that tab, the
-demo's wins today, and that is most of the ✗ rows below.
+The first reading found 19 missing behaviours, eight of them promised by
+the demo's own footers. Kenny's answers the same evening: *homelab wins*
+where a demo key and a homelab key collide, and *all 19* are built. So
+the demo's own keys moved to where homelab leaves room: Tab and
+Shift+Tab walk the screens (homelab's own keys for it), the digits and
+`& é " ' (` jump to homelab's five rebuilt tabs, F2 turns the effects
+down (homelab's key for it), `t` stays the theme because homelab leaves
+it free, and the alarm lives only on the demo's own screens. `s` and `m`
+no longer mean anything outside a screen that uses them.
+
+One row of the first reading was wrong: it read the demo's `Dashboard`
+screen as homelab's dashboard. That screen is the crate's own live
+machine view; homelab's dashboard is the ops rebuild, where `j` and `k`
+already chose a stack. So 18 were built, and the nineteenth was already
+there.
+
+Every row below is a test in `examples/demo/app.rs`, run by the gates.
 
 **Global.**
 
 | homelab | does | demo |
 | --- | --- | --- |
 | `q` | quit (H:711) | ✓ |
-| Ctrl+K, Ctrl+P | command palette (H:713) | ✗ only `p` on the console screen; Ctrl+K is read as `k` |
-| palette Enter | runs the action (H:1195) | ✗ closes the palette; Down has no bound |
-| F2 | effect intensity (H:718) | ✗ `m` is a partial stand-in |
-| `h` | help overlay (H:722) | ✗ |
-| Tab, Shift+Tab | next, previous tab (H:723) | ✗ `s` goes forward only |
-| `1`–`6`, `& é " ' ( §` | jump to a tab, azerty-safe (H:733) | ✗ |
+| Ctrl+K, Ctrl+P | command palette on every screen (H:713) | ✓ homelab's nineteen actions |
+| palette Enter | runs the action, arrows wrap (H:1195) | ✓ |
+| F2 | effect intensity (H:718) | ✓ full ⇄ reduced motion |
+| `h` | help overlay, Esc/`h`/Enter close (H:722) | ✓ this screen's keys, then the shared ones |
+| Tab, Shift+Tab | next, previous screen (H:723) | ✓ |
+| `1`–`5`, `& é " ' (` | jump to a tab, azerty-safe (H:733) | ✓ `6`, the shell, is not rebuilt |
 
-**Stacks and dashboard** (fleet, ops, dashboard).
+**Stacks and dashboard** (fleet and ops share homelab's one handler).
 
 | homelab | does | demo |
 | --- | --- | --- |
-| ↑↓, `j` `k` | select a stack (H:764) | ✓ fleet, ops · ✗ dashboard scrolls the journal instead |
-| `r` | refresh (H:776) | host |
+| ↑↓, `j` `k` | select a stack (H:764) | ✓ |
+| `r` | refresh (H:776) | ✓ replays the screen's arrival |
 | `u` `D` `B` `U` `g` `A` `I` `c` `i` `e` | update, deploy, backup, guards, adopt, install, check, incidents, park (H:777–847) | host |
-| `R` | restore, behind a typed-name confirm (H:798) | ✗ the confirm dialog is a view |
-| `p` | plan preview, Enter runs, Esc cancels (H:848) | ✗ the preview is a view |
-| `n` | new-stack wizard (H:849) | ✗ only a mock stepper on the console screen |
+| `R` | restore, behind a typed-name confirm (H:798) | ✓ the confirm; the restore itself is host |
+| `p` | plan preview; Enter runs the deploy, Esc drops it (H:848) | ✓ Enter opens the deploy window |
+| `n` | new-stack wizard, five steps (H:849, H:1752) | ✓ preset, name, resources, storage, review |
 
-**Logs.** Nothing missing: Space, ↑↓ `j` `k`, ←→, `G` End all ✓, and the
-demo adds the level filter and sideways panning [fix-65, fix-67].
+**Logs.** Space, ↑↓ `j` `k`, ←→, `G` End all ✓, and the demo adds the level
+filter and sideways panning [fix-65, fix-67].
 
 **Deploy window.**
 
 | homelab | does | demo |
 | --- | --- | --- |
-| ↑↓ | scroll the feed (H:633) | ✗ **footer** |
-| `a` / `s` while a step asks | yes / no, every other key swallowed (H:623) | ✗ **footer** — `a` is the alarm, `s` leaves the screen |
-| Esc | window to the background, the deploy keeps running (H:635) | ✗ **footer** — Esc quits the demo |
-| Enter when done | close the window (H:644) | ✗ |
+| `a` / `s` while a step asks | allow / stop, every other key swallowed (H:623) | ✓ |
+| ↑↓ | scroll the feed (H:633) | ✓ |
+| Esc | window to the background, the deploy keeps running (H:635) | ✓ it finishes behind the screen |
+| Enter when done | close the window (H:644) | ✓ |
 
 **Settings.**
 
 | homelab | does | demo |
 | --- | --- | --- |
 | ↑↓ | field (H:942) | ✓ |
-| ←→ | change the value (H:944) | ✗ **footer** |
-| `a`, `d` | add, delete a retention tier (H:975, H:991) | ✗ **footer** for `a` — it is the alarm |
-| Enter on the webhook row | edit it in place (H:999) | ✗ **footer** |
-| `S` | save (H:1002) | host, but ✗ **footer** — lowercase `s` leaves the screen |
-| `r` | reload (H:1007) | host |
+| ←→ | change the value, on homelab's presets (H:944) | ✓ |
+| `a`, `d` | add, delete a retention tier (H:975, H:991) | ✓ |
+| Enter on the webhook row | edit it in place; the edit swallows digits (H:999) | ✓ |
+| `S` | save (H:1002) | ✓ the host side takes the edit; sending it is host |
+| `r` | reload (H:1007) | ✓ the edit goes back to the host's values |
 
 **Doctor.** `r` and Enter ✓ (Enter since fix-68).
 
-**Splash.** Any key enters (H:609) — ✗ **footer**: the boot text says
-"press any key" and only `s` moves on.
+**Splash.** Any key enters the dashboard (H:609) ✓.
 
-Of the demo's own keys, `q`, `a` and `m` sit on keys azerty moves; the
-demo binds no digits and no punctuation.
+Of the demo's keys, `q` and `a` sit on keys azerty moves, the same
+keys homelab puts there; the demo's own `m` and `s` are gone.

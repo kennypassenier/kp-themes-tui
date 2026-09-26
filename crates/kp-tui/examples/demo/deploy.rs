@@ -19,6 +19,7 @@
 //! columns are fixed, so a longer name cannot push the timing sideways
 //! [fix-64].
 
+use crossterm::event::KeyCode;
 use kp_tui::{
     Badge, Glitch, KeyHints, Meter, Popup, PopupKind, Stream, Theme, Tone, fx::Motion, spinner,
 };
@@ -134,18 +135,156 @@ pub const PHASES: [Phase; 6] = [
     },
 ];
 
-const KEYS: [(&str, &str); 3] = [
+/// The footer, by where the deploy stands; the help overlay reads it too.
+pub const KEYS_ASKING: [(&str, &str); 2] = [("a", "allow"), ("s", "stop")];
+pub const KEYS_RUNNING: [(&str, &str); 3] = [
     ("↑↓", "scroll"),
-    ("a / s", "answer"),
     ("esc", "background — the deploy keeps running"),
+    ("q", "quit"),
 ];
+pub const KEYS_DONE: [(&str, &str); 3] = [("↑↓", "scroll"), ("enter", "close"), ("q", "quit")];
 
-pub fn draw(frame: &mut Frame, th: &Theme, asking: bool, reveal_ms: u32, motion: Motion) {
+/// This deploy's own state, the part homelab keeps in its `Focus` and its
+/// `PendingAsk`: whether a step is waiting on an answer, what it was
+/// given, how far the feed is scrolled back, and whether it is done.
+pub struct Deploy {
+    pub asking: bool,
+    pub allowed: Option<bool>,
+    /// Lines scrolled back from the foot of the feed.
+    pub scroll: usize,
+    /// Milliseconds since the answer; the rest of the deploy runs on it.
+    pub since_answer: u32,
+    pub done: bool,
+}
+
+/// How long the demo's deploy runs on after its question is answered.
+pub const FINISH_MS: u32 = 1500;
+
+impl Default for Deploy {
+    fn default() -> Self {
+        Deploy {
+            asking: true,
+            allowed: None,
+            scroll: 0,
+            since_answer: 0,
+            done: false,
+        }
+    }
+}
+
+/// What a key did to the window, for the screen around it.
+#[derive(Debug, PartialEq, Eq)]
+pub enum After {
+    Stay,
+    /// The window closes; the deploy is over.
+    Close,
+    /// The window goes; the deploy keeps running behind it.
+    Background,
+}
+
+impl Deploy {
+    /// One key, the way homelab's `on_key` reads it while its focus window
+    /// is up: a waiting question outranks everything, and every key but
+    /// its two answers is swallowed, because scrolling past a question is
+    /// how it gets missed.
+    pub fn key(&mut self, code: KeyCode) -> After {
+        if self.asking {
+            match code {
+                KeyCode::Char('a') => self.answer(true),
+                KeyCode::Char('s') => self.answer(false),
+                _ => {}
+            }
+            return After::Stay;
+        }
+        match code {
+            KeyCode::Up => {
+                self.scroll = (self.scroll + 1).min(self.feed().len().saturating_sub(1));
+            }
+            KeyCode::Down => self.scroll = self.scroll.saturating_sub(1),
+            KeyCode::Esc if self.done => return After::Close,
+            KeyCode::Esc => return After::Background,
+            KeyCode::Enter if self.done => return After::Close,
+            _ => {}
+        }
+        After::Stay
+    }
+
+    /// The step takes its answer and the deploy runs on; the demo has no
+    /// host to wait on, so the end follows the answer by a moment.
+    fn answer(&mut self, allow: bool) {
+        self.asking = false;
+        self.allowed = Some(allow);
+    }
+
+    pub fn tick(&mut self, ms: u32) {
+        if self.allowed.is_some() && !self.done {
+            self.since_answer = self.since_answer.saturating_add(ms);
+            self.done = self.since_answer >= FINISH_MS;
+        }
+    }
+
+    pub fn keys(&self) -> &'static [(&'static str, &'static str)] {
+        if self.asking {
+            &KEYS_ASKING
+        } else if self.done {
+            &KEYS_DONE
+        } else {
+            &KEYS_RUNNING
+        }
+    }
+
+    /// The transcript as it stands, with what the answer set in motion.
+    pub fn feed(&self) -> Vec<(&'static str, Tone)> {
+        let mut lines: Vec<(&'static str, Tone)> =
+            TRANSCRIPT.iter().map(|s| (s.text, s.tone)).collect();
+        match self.allowed {
+            Some(true) => lines.extend([
+                ("[ask ] prune — allowed", Tone::Success),
+                ("[run ] docker image prune: 3 images, 2.1 GB", Tone::Info),
+            ]),
+            Some(false) => lines.push(("[ask ] prune — stopped by the operator", Tone::Warning)),
+            None => {}
+        }
+        if self.done {
+            lines.push(("[ok  ] jellyfin healthy after 41 s", Tone::Success));
+            lines.push(match self.allowed {
+                Some(true) => ("[done] deploy media — ok", Tone::Success),
+                _ => ("[done] deploy media — ok, 3 images kept", Tone::Success),
+            });
+        }
+        lines
+    }
+
+    fn phases(&self) -> Vec<(&'static str, Tone, &'static str)> {
+        let mut out: Vec<_> = PHASES.iter().map(|p| (p.name, p.state, p.says)).collect();
+        if !self.asking && !self.done {
+            out[5] = match self.allowed {
+                Some(true) => ("prune", Tone::Info, "pruning 3 images"),
+                _ => ("prune", Tone::MutedInk, "stopped by the operator"),
+            };
+        }
+        if self.done {
+            out[3] = ("up", Tone::Success, "6 of 6 recreated");
+            out[4] = ("health", Tone::Success, "healthy after 41 s");
+            out[5] = match self.allowed {
+                Some(true) => ("prune", Tone::Success, "2.1 GB freed"),
+                _ => ("prune", Tone::MutedInk, "stopped by the operator"),
+            };
+        }
+        out
+    }
+}
+
+pub fn draw(frame: &mut Frame, th: &Theme, d: &Deploy, reveal_ms: u32, motion: Motion) {
     let screen = frame.area();
 
     // The title glitches where a register declares it, which is the same
     // routine homelab runs over this title by hand.
-    let title = "Deploy media — live";
+    let title = if d.done {
+        "Deploy media — done"
+    } else {
+        "Deploy media — live"
+    };
     let glitched =
         th.a.fx
             .alarm
@@ -173,9 +312,9 @@ pub fn draw(frame: &mut Frame, th: &Theme, asking: bool, reveal_ms: u32, motion:
     // Two panes: where the deploy stands, and what it has been saying.
     let [steps, feed] =
         Layout::horizontal([Constraint::Length(34), Constraint::Min(30)]).areas(panes);
-    draw_steps(frame, th, steps);
-    draw_feed(frame, th, feed);
-    if asking {
+    draw_steps(frame, th, steps, &d.phases());
+    draw_feed(frame, th, feed, &d.feed(), d.scroll);
+    if d.asking {
         draw_ask(frame, th, feed);
     }
 
@@ -200,9 +339,14 @@ pub fn draw(frame: &mut Frame, th: &Theme, asking: bool, reveal_ms: u32, motion:
     // The gauge, with the sentence written across it rather than a
     // percentage beside it: on one row there is no space for both, and
     // what an operator wants here is what is happening.
-    Meter::new(th, "deploy", 0.62)
+    let (share, says) = if d.done {
+        (1.0, "done — enter closes")
+    } else {
+        (0.62, "streaming over TLS…")
+    };
+    Meter::new(th, "deploy", share)
         .thresholds(2.0, 2.0)
-        .across("streaming over TLS…")
+        .across(says)
         .render(gauge, frame.buffer_mut());
 
     Paragraph::new(Line::from(
@@ -211,7 +355,7 @@ pub fn draw(frame: &mut Frame, th: &Theme, asking: bool, reveal_ms: u32, motion:
                 format!("{} ", spinner(th, reveal_ms, motion)),
                 Style::new().fg(th.c.primary),
             )],
-            KeyHints::new(th, &KEYS).footer().spans,
+            KeyHints::new(th, d.keys()).footer().spans,
         ]
         .concat(),
     ))
@@ -221,27 +365,24 @@ pub fn draw(frame: &mut Frame, th: &Theme, asking: bool, reveal_ms: u32, motion:
 
 /// The left pane: the steps, their state and what each one has to say
 /// for itself — all three in columns that do not move.
-fn draw_steps(frame: &mut Frame, th: &Theme, area: Rect) {
-    let names: Vec<&str> = PHASES.iter().map(|p| p.name).collect();
+fn draw_steps(frame: &mut Frame, th: &Theme, area: Rect, phases: &[(&str, Tone, &str)]) {
+    let names: Vec<&str> = phases.iter().map(|p| p.0).collect();
     let column = kp_tui::label_column(th, &names) + 2;
     let mut lines = vec![Line::from(Span::styled(
         "  where it stands".to_string(),
         Style::new().fg(th.c.muted_foreground),
     ))];
-    for phase in PHASES.iter() {
-        let ink = th.ink(phase.state, th.id.palette().popover);
+    for &(name, state, says) in phases {
+        let ink = th.ink(state, th.id.palette().popover);
         lines.push(Line::from(vec![
             Span::raw("  "),
-            Badge::state(th, phase.state),
+            Badge::state(th, state),
             Span::raw(" "),
             Span::styled(
-                format!("{:<column$}", phase.name),
+                format!("{:<column$}", name),
                 Style::new().fg(ink).add_modifier(Modifier::BOLD),
             ),
-            Span::styled(
-                phase.says.to_string(),
-                Style::new().fg(th.c.muted_foreground),
-            ),
+            Span::styled(says.to_string(), Style::new().fg(th.c.muted_foreground)),
         ]));
     }
     Paragraph::new(lines)
@@ -251,13 +392,18 @@ fn draw_steps(frame: &mut Frame, th: &Theme, area: Rect) {
 
 /// The right pane: the transcript, one line per step, each in the ink its
 /// tone deserves on the surface it lands on.
-fn draw_feed(frame: &mut Frame, th: &Theme, area: Rect) {
-    let lines: Vec<Line<'static>> = TRANSCRIPT
+fn draw_feed(frame: &mut Frame, th: &Theme, area: Rect, feed: &[(&str, Tone)], scroll: usize) {
+    // Anchored at the foot, as homelab's is: scrolling back moves the
+    // window up from the newest line.
+    let h = area.height as usize;
+    let end = feed.len().saturating_sub(scroll);
+    let start = end.saturating_sub(h);
+    let lines: Vec<Line<'static>> = feed[start..end]
         .iter()
-        .map(|step| {
+        .map(|(text, tone)| {
             Line::from(Span::styled(
-                format!("  {}", step.text),
-                Style::new().fg(th.ink(step.tone, th.id.palette().popover)),
+                format!("  {text}"),
+                Style::new().fg(th.ink(*tone, th.id.palette().popover)),
             ))
         })
         .collect();

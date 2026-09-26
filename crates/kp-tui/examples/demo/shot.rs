@@ -40,8 +40,8 @@ fn fixture() -> Sample {
     }
 }
 
-/// `--keys pst` presses p, s, t before the frame is drawn, so a shot can
-/// show a screen that only exists after a key (the palette is one).
+/// `--keys p⏎` presses p, then enter, before the frame is drawn, so a shot
+/// can show a screen that only exists after a key (a plan is one).
 fn press(app: &mut App, keys: &str) {
     for c in keys.chars() {
         let code = match c {

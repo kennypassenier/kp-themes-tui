@@ -111,7 +111,7 @@ pub fn feed() -> LogBuffer {
 }
 
 /// Every key the screen answers to, named where the reader can see them.
-const KEYS: [(&str, &str); 6] = [
+pub const KEYS: [(&str, &str); 6] = [
     ("←→", "source"),
     ("↑↓", "scroll — and pause"),
     ("H L", "sideways"),

@@ -17,6 +17,7 @@
 //! S would make of it. Every label is padded to one column, so no value
 //! sits against the word in front of it [fix-64].
 
+use crossterm::event::KeyCode;
 use kp_tui::{
     Badge, Choice, Field, KeyHints, Stage, Theme, Tone, fx::Motion, label_column, widgets::Panel,
 };
@@ -28,64 +29,209 @@ use ratatui::{
     widgets::{Paragraph, Widget},
 };
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Tier {
     pub every_days: u32,
     pub span_days: Option<u32>,
 }
 
-pub const TIERS: [Tier; 3] = [
-    Tier {
-        every_days: 1,
-        span_days: Some(7),
-    },
-    Tier {
-        every_days: 14,
-        span_days: Some(60),
-    },
-    Tier {
-        every_days: 60,
-        span_days: None,
-    },
-];
+/// The steps homelab offers for a tier's interval and its span, in its
+/// own order (`client/src/tui/model.rs`, `EVERY_PRESETS`, `SPAN_PRESETS`).
+const EVERY_PRESETS: &[u32] = &[1, 2, 3, 7, 14, 21, 30, 45, 60, 90, 120, 180];
+const SPAN_PRESETS: &[u32] = &[7, 14, 21, 30, 60, 90, 120, 180, 365, 730];
 
-pub const BACKUP_HOUR: Option<u32> = Some(3);
-pub const WEBHOOK: Option<&str> = None;
-pub const DIRTY: bool = true;
+/// The host's configuration as this screen edits it: what the host runs,
+/// what the operator has made of it, and the webhook while it is typed.
+/// homelab keeps the same three things on its model.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Config {
+    pub backup_hour: Option<u32>,
+    pub tiers: Vec<Tier>,
+    pub webhook: Option<String>,
+}
 
-/// The rows the arrow keys walk: the hour, then two per tier, then the hook.
-pub const ROWS: usize = 1 + TIERS.len() * 2 + 1;
+pub struct Settings {
+    /// What the host answered last; `r` reads it back, `S` replaces it.
+    pub host: Config,
+    /// What the screen shows and the arrows change.
+    pub edit: Config,
+    /// The row the arrows are on: the hour, two per tier, then the hook.
+    pub row: usize,
+    /// The webhook while it is being typed, which swallows every key.
+    pub typing: Option<String>,
+}
 
-/// What the host is running right now, against which the edits are read.
-/// A change shows in the diff; a row that matches shows as unchanged.
-const ON_HOST: [(&str, &str); 5] = [
-    ("nightly run", "04:00"),
-    ("keep daily", "every 1d for 7 days"),
-    ("keep fortnightly", "every 14d for 90 days"),
-    ("keep monthly", "every 60d forever"),
-    ("webhook", "off"),
-];
+impl Default for Settings {
+    fn default() -> Self {
+        let host = Config {
+            backup_hour: Some(4),
+            tiers: vec![
+                Tier {
+                    every_days: 1,
+                    span_days: Some(7),
+                },
+                Tier {
+                    every_days: 14,
+                    span_days: Some(90),
+                },
+                Tier {
+                    every_days: 60,
+                    span_days: None,
+                },
+            ],
+            webhook: None,
+        };
+        // Two edits already made, so the diff has something to show when
+        // the screen opens, as it always did.
+        let mut edit = host.clone();
+        edit.backup_hour = Some(3);
+        edit.tiers[1].span_days = Some(60);
+        Settings {
+            host,
+            edit,
+            row: 0,
+            typing: None,
+        }
+    }
+}
 
-const KEYS: [(&str, &str); 6] = [
+impl Settings {
+    /// The rows the arrow keys walk: the hour, then two per tier, then the hook.
+    pub fn rows(&self) -> usize {
+        2 + self.edit.tiers.len() * 2
+    }
+
+    fn webhook_row(&self) -> usize {
+        self.rows() - 1
+    }
+
+    /// One key, the way homelab's `settings_key` and
+    /// `settings_webhook_edit_key` read it. Returns what the status line
+    /// should say, if anything.
+    pub fn key(&mut self, code: KeyCode) -> Option<String> {
+        if let Some(buf) = self.typing.as_mut() {
+            match code {
+                KeyCode::Esc => self.typing = None,
+                KeyCode::Enter => {
+                    let text = buf.trim().to_string();
+                    self.edit.webhook = if text.is_empty() { None } else { Some(text) };
+                    self.typing = None;
+                }
+                KeyCode::Backspace => {
+                    buf.pop();
+                }
+                KeyCode::Char(c) => buf.push(c),
+                _ => {}
+            }
+            return None;
+        }
+        let row = self.row;
+        let hook = self.webhook_row();
+        match code {
+            KeyCode::Up | KeyCode::Char('k') => self.row = row.saturating_sub(1),
+            KeyCode::Down | KeyCode::Char('j') => self.row = (row + 1).min(hook),
+            KeyCode::Left | KeyCode::Right => {
+                let dir: i32 = if code == KeyCode::Left { -1 } else { 1 };
+                if row == 0 {
+                    self.edit.backup_hour = match (self.edit.backup_hour, dir) {
+                        (None, 1) => Some(0),
+                        (None, _) => Some(23),
+                        (Some(0), -1) => None,
+                        (Some(23), 1) => None,
+                        (Some(h), 1) => Some(h + 1),
+                        (Some(h), _) => Some(h - 1),
+                    };
+                } else if row < hook {
+                    let t = &mut self.edit.tiers[(row - 1) / 2];
+                    if (row - 1).is_multiple_of(2) {
+                        t.every_days = step(EVERY_PRESETS, t.every_days, dir);
+                    } else {
+                        let top = *SPAN_PRESETS.last().unwrap_or(&730);
+                        t.span_days = match (t.span_days, dir) {
+                            (None, -1) => Some(top),
+                            (None, _) => None,
+                            (Some(v), 1) if v >= top => None,
+                            (Some(v), d) => Some(step(SPAN_PRESETS, v, d)),
+                        };
+                    }
+                }
+            }
+            KeyCode::Char('a') => {
+                // A new tier goes in before the one that is kept forever.
+                let at = self
+                    .edit
+                    .tiers
+                    .iter()
+                    .position(|t| t.span_days.is_none())
+                    .unwrap_or(self.edit.tiers.len());
+                self.edit.tiers.insert(
+                    at,
+                    Tier {
+                        every_days: 30,
+                        span_days: Some(90),
+                    },
+                );
+            }
+            KeyCode::Char('d') => {
+                if row >= 1 && row < hook && self.edit.tiers.len() > 1 {
+                    self.edit.tiers.remove((row - 1) / 2);
+                    self.row = self.row.min(self.webhook_row());
+                }
+            }
+            KeyCode::Enter if row == hook => {
+                self.typing = Some(self.edit.webhook.clone().unwrap_or_default());
+            }
+            KeyCode::Char('S') => {
+                self.host = self.edit.clone();
+                return Some("settings sent to host".into());
+            }
+            KeyCode::Char('r') => {
+                self.edit = self.host.clone();
+                self.row = self.row.min(self.webhook_row());
+                return Some("host settings reloaded".into());
+            }
+            _ => {}
+        }
+        None
+    }
+
+    /// Whether this screen is holding the keyboard for text.
+    pub fn typing(&self) -> bool {
+        self.typing.is_some()
+    }
+}
+
+fn step(presets: &[u32], current: u32, dir: i32) -> u32 {
+    let pos = presets.iter().position(|p| *p >= current).unwrap_or(0);
+    let next = (pos as i32 + dir).clamp(0, presets.len() as i32 - 1) as usize;
+    presets[next]
+}
+
+/// What a tier is called in the card, by its interval; homelab numbers
+/// them, and a number says less than "daily" does.
+pub fn tier_name(t: &Tier, i: usize) -> String {
+    match t.every_days {
+        1 => "daily".into(),
+        7 => "weekly".into(),
+        14 => "fortnightly".into(),
+        30 => "monthly".into(),
+        60 => "bimonthly".into(),
+        90 => "quarterly".into(),
+        _ => format!("tier {}", i + 1),
+    }
+}
+
+pub const KEYS: [(&str, &str); 7] = [
     ("↑↓", "field"),
     ("←→", "value"),
-    ("a", "add tier"),
+    ("a / d", "add / delete tier"),
     ("enter", "edit webhook"),
     ("S", "save"),
+    ("r", "reload"),
     ("q", "quit"),
 ];
 
-/// Every label on the screen, so one column serves all three cards: a
-/// value may not start where its own label happens to end [fix-64].
-const LABELS: [&str; 6] = [
-    "nightly run",
-    "window",
-    "daily",
-    "fortnightly",
-    "monthly",
-    "on failure",
-];
-
-pub fn draw(frame: &mut Frame, th: &Theme, selected: usize, reveal_ms: u32, motion: Motion) {
+pub fn draw(frame: &mut Frame, th: &Theme, st: &Settings, reveal_ms: u32, motion: Motion) {
     let screen = frame.area();
     let stage = Stage::new(reveal_ms, motion);
     let [cards, diff, footer] = Layout::vertical([
@@ -95,18 +241,23 @@ pub fn draw(frame: &mut Frame, th: &Theme, selected: usize, reveal_ms: u32, moti
     ])
     .areas(screen);
 
-    let column = label_column(th, &LABELS) + 2;
+    // Every label on the screen, so one column serves all three cards: a
+    // value may not start where its own label happens to end [fix-64].
+    let names: Vec<String> = st
+        .edit
+        .tiers
+        .iter()
+        .enumerate()
+        .map(|(i, t)| tier_name(t, i))
+        .collect();
+    let mut labels = vec!["nightly run", "window", "on failure"];
+    labels.extend(names.iter().map(String::as_str));
+    let column = label_column(th, &labels) + 2;
     let cols = Layout::horizontal([Constraint::Ratio(1, 3); 3]).split(cards);
-    draw_schedule(
-        frame, th, cols[0], selected, column, stage, reveal_ms, motion,
-    );
-    draw_retention(
-        frame, th, cols[1], selected, column, stage, reveal_ms, motion,
-    );
-    draw_notify(
-        frame, th, cols[2], selected, column, stage, reveal_ms, motion,
-    );
-    draw_diff(frame, th, diff, stage, reveal_ms, motion);
+    draw_schedule(frame, th, cols[0], st, column, stage, reveal_ms, motion);
+    draw_retention(frame, th, cols[1], st, column, stage, reveal_ms, motion);
+    draw_notify(frame, th, cols[2], st, column, stage, reveal_ms, motion);
+    draw_diff(frame, th, diff, st, stage, reveal_ms, motion);
 
     Paragraph::new(KeyHints::new(th, &KEYS).footer())
         .style(Style::new().bg(th.c.background))
@@ -114,7 +265,9 @@ pub fn draw(frame: &mut Frame, th: &Theme, selected: usize, reveal_ms: u32, moti
 }
 
 /// The rows of one card, drawn on the card's own plate.
-fn put(frame: &mut Frame, th: &Theme, inner: Rect, lines: Vec<Line<'static>>) {
+fn put(frame: &mut Frame, th: &Theme, inner: Rect, mut lines: Vec<Line<'static>>) {
+    // A card with more tiers than rows gives up its help text first.
+    lines.truncate(inner.height as usize);
     let areas = Layout::vertical(vec![Constraint::Length(1); lines.len().max(1)]).split(inner);
     for (n, line) in lines.into_iter().enumerate() {
         Paragraph::new(line)
@@ -135,12 +288,13 @@ fn draw_schedule(
     frame: &mut Frame,
     th: &Theme,
     area: Rect,
-    selected: usize,
+    st: &Settings,
     column: usize,
     stage: Stage,
     reveal_ms: u32,
     motion: Motion,
 ) {
+    let selected = st.row;
     let panel = Panel::new(th, "Schedule")
         .focused(selected == 0)
         .stage(stage)
@@ -148,7 +302,7 @@ fn draw_schedule(
     let inner = panel.block().inner(area);
     frame.render_widget(panel, area);
 
-    let hour = match BACKUP_HOUR {
+    let hour = match st.edit.backup_hour {
         Some(h) => format!("{h:02}:00"),
         None => "off".into(),
     };
@@ -174,13 +328,14 @@ fn draw_retention(
     frame: &mut Frame,
     th: &Theme,
     area: Rect,
-    selected: usize,
+    st: &Settings,
     column: usize,
     stage: Stage,
     reveal_ms: u32,
     motion: Motion,
 ) {
-    let focused = (1..=TIERS.len() * 2).contains(&selected);
+    let selected = st.row;
+    let focused = (1..=st.edit.tiers.len() * 2).contains(&selected);
     let panel = Panel::new(th, "Retention")
         .focused(focused)
         .stage(stage)
@@ -188,9 +343,8 @@ fn draw_retention(
     let inner = panel.block().inner(area);
     frame.render_widget(panel, area);
 
-    let names = ["daily", "fortnightly", "monthly"];
     let mut lines = Vec::new();
-    for (i, tier) in TIERS.iter().enumerate() {
+    for (i, tier) in st.edit.tiers.iter().enumerate() {
         // Short in the card, spelled out in the diff under it: a card
         // this narrow cannot carry both words and both steppers.
         //
@@ -205,7 +359,8 @@ fn draw_retention(
                 None => "always".into(),
             }
         );
-        let left = Choice::new(th, names[i], &every).focused(selected == 1 + i * 2);
+        let name = tier_name(tier, i);
+        let left = Choice::new(th, &name, &every).focused(selected == 1 + i * 2);
         let right = Choice::new(th, "", &span).focused(selected == 2 + i * 2);
         lines.push(Line::from(
             [
@@ -228,13 +383,14 @@ fn draw_notify(
     frame: &mut Frame,
     th: &Theme,
     area: Rect,
-    selected: usize,
+    st: &Settings,
     column: usize,
     stage: Stage,
     reveal_ms: u32,
     motion: Motion,
 ) {
-    let hook_row = 1 + TIERS.len() * 2;
+    let selected = st.row;
+    let hook_row = st.rows() - 1;
     let panel = Panel::new(th, "Notify")
         .focused(selected == hook_row)
         .stage(stage)
@@ -244,7 +400,12 @@ fn draw_notify(
 
     // The one row that is typed into rather than stepped through: the
     // theme's own caret, blinking at the rate its register states.
-    let field = Field::new(th, "webhook", WEBHOOK.unwrap_or("off — enter to set"))
+    let shown = match (&st.typing, &st.edit.webhook) {
+        (Some(typed), _) => typed.clone(),
+        (None, Some(url)) => url.clone(),
+        (None, None) => "off — enter to set".into(),
+    };
+    let field = Field::new(th, "webhook", &shown)
         .focused(selected == hook_row)
         .label_width(column)
         .blink(reveal_ms / 16);
@@ -270,28 +431,13 @@ fn draw_diff(
     frame: &mut Frame,
     th: &Theme,
     area: Rect,
+    st: &Settings,
     stage: Stage,
     reveal_ms: u32,
     motion: Motion,
 ) {
-    let wanted = [
-        (
-            "nightly run",
-            match BACKUP_HOUR {
-                Some(h) => format!("{h:02}:00"),
-                None => "off".into(),
-            },
-        ),
-        ("keep daily", tier_words(0)),
-        ("keep fortnightly", tier_words(1)),
-        ("keep monthly", tier_words(2)),
-        ("webhook", WEBHOOK.unwrap_or("off").to_string()),
-    ];
-    let changed = wanted
-        .iter()
-        .zip(ON_HOST)
-        .filter(|((_, w), (_, h))| w != h)
-        .count();
+    let rows = diff_rows(&st.host, &st.edit);
+    let changed = rows.iter().filter(|(_, h, w)| h != w).count();
     let title = match changed {
         0 => "In sync with the host".to_string(),
         1 => "1 unsaved change".to_string(),
@@ -304,11 +450,11 @@ fn draw_diff(
     frame.render_widget(panel, area);
 
     // Three columns at fixed starts: the setting, the host, the edit.
-    let names: Vec<&str> = ON_HOST.iter().map(|(n, _)| *n).collect();
+    let names: Vec<&str> = rows.iter().map(|(n, _, _)| n.as_str()).collect();
     let name_w = label_column(th, &names) + 2;
-    let host_w = ON_HOST
+    let host_w = rows
         .iter()
-        .map(|(_, v)| v.chars().count())
+        .map(|(_, v, _)| v.chars().count())
         .max()
         .unwrap_or(0)
         + 2;
@@ -326,7 +472,7 @@ fn draw_diff(
             Style::new().fg(th.c.muted_foreground),
         ),
     ])];
-    for ((name, host), (_, want)) in ON_HOST.iter().zip(wanted.iter()) {
+    for (name, host, want) in rows.iter() {
         let differs = host != want;
         lines.push(Line::from(vec![
             Span::styled(
@@ -357,7 +503,7 @@ fn draw_diff(
 
     // The dirty marker: a dot in the tone the state deserves, and the word
     // beside it in an ink that reads on this surface.
-    let (tone, says) = if DIRTY && changed > 0 {
+    let (tone, says) = if changed > 0 {
         (Tone::Warning, "S applies them; R reloads the host's values")
     } else {
         (Tone::Success, "nothing to apply")
@@ -373,8 +519,34 @@ fn draw_diff(
     put(frame, th, inner, lines);
 }
 
-fn tier_words(i: usize) -> String {
-    let t = &TIERS[i];
+/// The diff's rows: the setting, what the host runs, what S would send.
+/// Tiers are paired by position, so one that exists on one side only
+/// reads as added or removed rather than shifting every row under it.
+fn diff_rows(host: &Config, edit: &Config) -> Vec<(String, String, String)> {
+    let hour = |h: Option<u32>| match h {
+        Some(h) => format!("{h:02}:00"),
+        None => "off".into(),
+    };
+    let mut rows = vec![(
+        "nightly run".to_string(),
+        hour(host.backup_hour),
+        hour(edit.backup_hour),
+    )];
+    for i in 0..host.tiers.len().max(edit.tiers.len()) {
+        let (h, e) = (host.tiers.get(i), edit.tiers.get(i));
+        let name = e.or(h).map(|t| tier_name(t, i)).unwrap_or_default();
+        rows.push((
+            format!("keep {name}"),
+            h.map(tier_words).unwrap_or_else(|| "—".into()),
+            e.map(tier_words).unwrap_or_else(|| "removed".into()),
+        ));
+    }
+    let hook = |w: &Option<String>| w.clone().unwrap_or_else(|| "off".into());
+    rows.push(("webhook".into(), hook(&host.webhook), hook(&edit.webhook)));
+    rows
+}
+
+fn tier_words(t: &Tier) -> String {
     match t.span_days {
         Some(d) => format!("every {}d for {d} days", t.every_days),
         None => format!("every {}d forever", t.every_days),

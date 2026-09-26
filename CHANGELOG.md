@@ -15,6 +15,30 @@ footer said and homelab does; enter used to fall through to the components
 screen's buttons. A failed finding is bold again, as in homelab. The demo's
 own tests now run in the gates [fix-68].
 
+**Changed.** Every rebuilt screen now answers to homelab's own keys, all of
+them that do not need a live host, so the proof holds for what a screen
+does as well as for how it looks [fix-68, docs/HOMELAB_PROOF.md]. Kenny,
+2026-09-26: homelab's key wins where it and a demo key collide, and all the
+missing behaviours are built.
+
+- The command palette opens on every screen with Ctrl+K or Ctrl+P and runs
+  homelab's nineteen actions; `h` opens a help overlay with the screen's
+  own keys.
+- Tab and Shift+Tab walk the screens, and `1`–`5` (or `& é " ' (` on
+  azerty) jump to homelab's tabs. `s` no longer changes the screen.
+- F2 turns the effects down and up, where `m` did.
+- The stack screens show a change plan on `p` that Enter turns into a
+  deploy, ask for the stack's name on `R` before a restore, and open the
+  five-step new-stack wizard on `n`.
+- The deploy window takes its answer on `a` or `s` and swallows every
+  other key while it waits, scrolls its feed, goes to the background on
+  Esc and closes on Enter once done.
+- Settings steps its values on homelab's presets, adds and deletes
+  retention tiers, edits the webhook in place, saves on `S` and reloads on
+  `r`. A tier is named by its interval, so the 60-day tier reads
+  "bimonthly" where it read "monthly".
+- The splash gives way to any key.
+
 ## 0.1.0 — 2026-09-20
 
 The first release. kp-tui carries the twenty-two kp-themes registers into a

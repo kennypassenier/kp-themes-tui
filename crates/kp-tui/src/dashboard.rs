@@ -278,7 +278,7 @@ pub fn draw(frame: &mut Frame, d: &Dashboard, v: &View) {
     draw_memdisk(frame, d, v, a.memdisk);
     draw_logs(frame, d, v, a.logs);
 
-    let keys = " s screen · t theme · p pause · f filter · ↑/↓ PgUp/PgDn scroll · End follow · m motion · r replay · q quit";
+    let keys = " tab screen · t theme · p pause · f filter · ↑/↓ PgUp/PgDn scroll · End follow · F2 motion · r replay · q quit";
     frame.render_widget(
         Paragraph::new(keys).style(Style::new().bg(c.secondary).fg(c.secondary_foreground)),
         a.footer,
