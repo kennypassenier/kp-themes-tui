@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.1 — 2026-09-26
 
 **Changed.** A log stamp is drawn to the second. `LogLine::to_the_second`
 gives the renderer the hours, minutes and seconds and drops the

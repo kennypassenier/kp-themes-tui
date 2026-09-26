@@ -74,10 +74,10 @@ plus its anatomy), and the widgets:
 
 ## Status
 
-Started 2026-09-17, first release `0.1.0` on 2026-09-20
-([CHANGELOG.md](CHANGELOG.md)), pinned to the kp-themes 7.1.0 palette. The
-crates build, 64 tests pass, clippy is clean, and CI runs fmt, clippy and
-the suite on every push.
+Started 2026-09-17, first release `0.1.0` on 2026-09-20, latest `0.1.1` on
+2026-09-26 ([CHANGELOG.md](CHANGELOG.md)), pinned to the kp-themes 7.1.0
+palette. The crates build, 80 tests pass, clippy is clean, and CI runs fmt,
+clippy and the suite on every push.
 
 The demo draws eleven screens — `dashboard`, `components`, `console`,
 `effects`, `fleet`, `ops`, `settings`, `logs`, `deploy`, `doctor`,
@@ -85,7 +85,9 @@ The demo draws eleven screens — `dashboard`, `components`, `console`,
 nothing but this crate, measured and put side by side with homelab's
 client in [docs/HOMELAB_PROOF.md](docs/HOMELAB_PROOF.md). Eight of
 homelab's nine are rebuilt; the shell tab is a terminal inside a terminal
-and is left alone.
+and is left alone. Every rebuilt screen answers to homelab's own keys —
+the palette, the help, the plan, the restore confirm, the wizard — and a
+test presses each of them.
 
 Twenty-five design directions, five per rebuilt screen, were drawn on the
 way there. Kenny picked one per screen on 2026-09-19 and unpicked one of

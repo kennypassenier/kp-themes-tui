@@ -13,10 +13,10 @@ gates hold from any session or terminal. After a fresh clone, run:
 
 | Field | Value |
 |---|---|
-| Current phase | **Building, after 0.1.0** (released 2026-09-20 with kp-themes 7.1.0). kp-themes' research is the scope [kp-themes scope-127]; the proof against homelab is `docs/HOMELAB_PROOF.md` |
-| Last completed gate | **The 0.1.0 release, 2026-09-20.** The widgets form was answered 2026-09-17 in the kp-themes session ("alles in een keer", kp-themes scope-129) |
-| Next gate | the keys form of 2026-09-26: who wins where a demo key and a homelab key collide, how far the rebuild follows homelab's keys [fix-68], the small-font read of the bars [fix-66-M1], when 0.1.1 is cut |
-| Next action | waiting on Kenny: the keys form of 2026-09-26 (Hearth thread "kp-tui"); the bar page is https://claude.ai/artifact/DGoWLfpNk1fV7meN75et3E |
+| Current phase | **Building, after 0.1.1** (released 2026-09-26; 0.1.0 on 2026-09-20 with kp-themes 7.1.0). kp-themes' research is the scope [kp-themes scope-127]; the proof against homelab is `docs/HOMELAB_PROOF.md` |
+| Last completed gate | **The keys form, 2026-09-26** (Hearth thread "kp-tui"): homelab's keys win, all missing behaviours built [fix-68], the bars read at a small font [fix-66-M1 closed], 0.1.1 after the key work |
+| Next gate | none open; the queue in docs/CORRECTIONS.md holds fix-2..fix-68 measurements, of which fix-68-M1 is the one still waiting (next screen rebuilt or changed) |
+| Next action | waiting on Kenny: the next direction for kp-tui — nothing is asked of him |
 | AFK mode | off |
 
 <!-- Update this block after every completed gate. -->
