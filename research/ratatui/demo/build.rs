@@ -1,0 +1,217 @@
+//! Reads the kp-themes sources and writes `$OUT_DIR/palettes.rs`.
+//!
+//! Two sources, both from the package itself:
+//! - `themes/<name>/tokens.json`: every authored token (`hsl(h, s%, l%)`).
+//! - `css/themes.css`: the generated block `[data-theme='<name>'] { ... }`,
+//!   read only for the derived state colours (`--primary-hover`,
+//!   `--primary-active`, ...). Those are computed in OKLCh by the web
+//!   generator; reading its output keeps one implementation of the
+//!   derivation instead of porting it.
+//!
+//! The package root defaults to three levels up from this crate
+//! (`research/ratatui/demo`); `KP_THEMES_ROOT` overrides it. A token the
+//! palette needs and the sources lack stops the build: that is the drift
+//! check.
+
+use std::{collections::BTreeMap, env, fmt::Write as _, fs, path::PathBuf};
+
+/// Every theme the package ships, in its own order (`themes/order.json`).
+/// It was three while the demo was one screen; the anatomy of all
+/// twenty-two is what the crates need [scope-127].
+fn theme_names(root: &std::path::Path) -> Vec<String> {
+    let path = root.join("themes/order.json");
+    println!("cargo:rerun-if-changed={}", path.display());
+    let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let json: serde_json::Value = serde_json::from_str(&text).expect("order.json parses");
+    json.as_array()
+        .expect("order.json is an array")
+        .iter()
+        .map(|v| v.as_str().expect("a theme name").to_string())
+        .collect()
+}
+
+/// A theme name as a Rust identifier: `shade-light` -> `SHADE_LIGHT`.
+fn upper(name: &str) -> String {
+    name.replace('-', "_").to_uppercase()
+}
+
+/// Field name in Rust, token name in CSS, role (decides the 16-colour fallback).
+const FIELDS: &[(&str, &str, &str)] = &[
+    ("background", "background", "Surface"),
+    ("foreground", "foreground", "Ink"),
+    ("card", "card", "Surface"),
+    ("card_foreground", "card-foreground", "Ink"),
+    ("popover", "popover", "Surface"),
+    ("popover_foreground", "popover-foreground", "Ink"),
+    ("primary", "primary", "Fill"),
+    ("primary_foreground", "primary-foreground", "OnFill"),
+    ("primary_hover", "primary-hover", "Fill"),
+    ("primary_active", "primary-active", "Fill"),
+    ("primary_disabled", "primary-disabled", "Fill"),
+    ("secondary", "secondary", "Surface"),
+    ("secondary_foreground", "secondary-foreground", "Ink"),
+    ("secondary_active", "secondary-active", "Surface"),
+    ("muted", "muted", "Surface"),
+    ("muted_foreground", "muted-foreground", "MutedInk"),
+    ("accent", "accent", "Fill"),
+    ("accent_foreground", "accent-foreground", "OnFill"),
+    ("destructive", "destructive", "Fill"),
+    ("destructive_foreground", "destructive-foreground", "OnFill"),
+    ("success_foreground", "success-foreground", "Signal"),
+    ("warning_foreground", "warning-foreground", "Signal"),
+    ("info_foreground", "info-foreground", "Signal"),
+    ("border", "border", "Line"),
+    ("border_strong", "border-strong", "Line"),
+    ("ring", "ring", "Signal"),
+    ("selected", "selected", "Fill"),
+    ("fx_signal", "fx-signal", "Signal"),
+    ("fx_hot", "fx-hot", "Ink"),
+    // The dashboard: series colours, and the soft plate a pulse flashes.
+    ("chart_1", "chart-1", "Signal"),
+    ("chart_2", "chart-2", "Signal"),
+    ("chart_3", "chart-3", "Signal"),
+    ("chart_4", "chart-4", "Signal"),
+    ("chart_5", "chart-5", "Signal"),
+    ("warning", "warning", "Surface"),
+];
+
+fn parse_hsl(v: &str) -> Option<(f64, f64, f64)> {
+    let inner = v.trim().strip_prefix("hsl(")?.strip_suffix(')')?;
+    let mut it = inner.split(',').map(|p| p.trim().trim_end_matches('%').parse::<f64>());
+    Some((it.next()?.ok()?, it.next()?.ok()?, it.next()?.ok()?))
+}
+
+/// The algorithm of `js/contrast.js` `hslToRgb`, rounded to 8 bits the way a
+/// browser serialises a computed `rgb()`.
+fn hsl_to_rgb((h, s, l): (f64, f64, f64)) -> (u8, u8, u8) {
+    let (s, l) = (s / 100.0, l / 100.0);
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
+    let m = l - c / 2.0;
+    let (r, g, b) = match ((h / 60.0).floor() as i64).rem_euclid(6) {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let q = |u: f64| ((u + m) * 255.0).round().clamp(0.0, 255.0) as u8;
+    (q(r), q(g), q(b))
+}
+
+fn derived_block(css: &str, theme: &str) -> BTreeMap<String, String> {
+    let head = format!("\n[data-theme='{theme}'] {{");
+    let start = css.find(&head).unwrap_or_else(|| panic!("css/themes.css has no block for {theme}"));
+    let body = &css[start + head.len()..];
+    let body = &body[..body.find("\n}").expect("unterminated theme block")];
+    body.lines()
+        .filter_map(|line| {
+            let line = line.trim().strip_prefix("--")?;
+            let (name, value) = line.split_once(':')?;
+            let is_state = ["-hover", "-active", "-disabled"].iter().any(|s| name.ends_with(s));
+            is_state.then(|| (name.to_string(), value.trim().trim_end_matches(';').to_string()))
+        })
+        .collect()
+}
+
+fn main() {
+    let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let root = env::var_os("KP_THEMES_ROOT").map(PathBuf::from).unwrap_or_else(|| manifest.join("../../.."));
+    println!("cargo:rerun-if-env-changed=KP_THEMES_ROOT");
+
+    let css_path = root.join("css/themes.css");
+    println!("cargo:rerun-if-changed={}", css_path.display());
+    let css = fs::read_to_string(&css_path).unwrap_or_else(|e| panic!("{}: {e}", css_path.display()));
+    let pkg = fs::read_to_string(root.join("package.json")).expect("package.json");
+    let pkg: serde_json::Value = serde_json::from_str(&pkg).expect("package.json parses");
+
+    let mut out = String::new();
+    writeln!(out, "// GENERATED by build.rs from kp-themes; do not edit.").unwrap();
+    writeln!(out, "pub const PACKAGE_VERSION: &str = {:?};\n", pkg["version"].as_str().unwrap_or("?")).unwrap();
+
+    // The palette struct, generic over the colour type so the same shape
+    // carries RGB (generated) and ratatui `Color` (resolved per terminal).
+    writeln!(out, "#[derive(Clone, Copy, Debug, PartialEq)]\npub struct Palette<C> {{").unwrap();
+    for (field, token, _) in FIELDS {
+        writeln!(out, "    /// `--{token}`\n    pub {field}: C,").unwrap();
+    }
+    writeln!(out, "}}\n\nimpl<C: Copy> Palette<C> {{").unwrap();
+    writeln!(out, "    pub fn map<D>(&self, f: impl Fn(Role, C) -> D) -> Palette<D> {{\n        Palette {{").unwrap();
+    for (field, _, role) in FIELDS {
+        writeln!(out, "            {field}: f(Role::{role}, self.{field}),").unwrap();
+    }
+    writeln!(out, "        }}\n    }}\n}}\n").unwrap();
+
+    let names = theme_names(&root);
+    for theme in &names {
+        let path = root.join(format!("themes/{theme}/tokens.json"));
+        println!("cargo:rerun-if-changed={}", path.display());
+        let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        let json: serde_json::Value = serde_json::from_str(&text).expect("tokens.json parses");
+        let mut values: BTreeMap<String, String> = json["entries"]
+            .as_array()
+            .expect("entries")
+            .iter()
+            .filter_map(|e| Some((e["token"].as_str()?.to_string(), e["value"].as_str()?.to_string())))
+            .collect();
+        let authored: Vec<(String, String, (f64, f64, f64))> =
+            values.iter().filter_map(|(k, v)| Some((k.clone(), v.clone(), parse_hsl(v)?))).collect();
+        values.extend(derived_block(&css, theme));
+
+        let upper = upper(theme);
+        let dark = values.get("color-scheme").map(|v| v == "dark").unwrap_or(false);
+        let ms = values.get("fx-duration").and_then(|v| v.trim_end_matches("ms").parse::<u32>().ok()).unwrap_or(180);
+        writeln!(out, "pub const {upper}_DARK: bool = {dark};").unwrap();
+        writeln!(out, "/// `--fx-duration`, in milliseconds.\npub const {upper}_FX_DURATION_MS: u32 = {ms};").unwrap();
+
+        writeln!(out, "pub const {upper}: Palette<Rgb> = Palette {{").unwrap();
+        for (field, token, _) in FIELDS {
+            let v = values.get(*token).unwrap_or_else(|| panic!("{theme}: token --{token} is missing"));
+            let hsl = parse_hsl(v).unwrap_or_else(|| panic!("{theme}: --{token} is not hsl(): {v}"));
+            let (r, g, b) = hsl_to_rgb(hsl);
+            writeln!(out, "    {field}: Rgb({r}, {g}, {b}), // {v}").unwrap();
+        }
+        writeln!(out, "}};").unwrap();
+
+        // Every authored hsl token, for the parity test and for consumers
+        // that want a token the palette does not name.
+        writeln!(out, "pub const {upper}_TOKENS: &[(&str, Rgb)] = &[").unwrap();
+        for (name, text, hsl) in &authored {
+            let (r, g, b) = hsl_to_rgb(*hsl);
+            writeln!(out, "    ({name:?}, Rgb({r}, {g}, {b})), // {text}").unwrap();
+        }
+        writeln!(out, "];\n").unwrap();
+    }
+
+    // The three lookups the crate reads by index, so adding a theme is a
+    // line in order.json and nothing else.
+    writeln!(out, "pub const NAMES: &[&str] = &[").unwrap();
+    for theme in &names {
+        writeln!(out, "    {theme:?},").unwrap();
+    }
+    writeln!(out, "];\n").unwrap();
+    writeln!(out, "pub const PALETTES: &[Palette<Rgb>] = &[").unwrap();
+    for theme in &names {
+        writeln!(out, "    {},", upper(theme)).unwrap();
+    }
+    writeln!(out, "];\n").unwrap();
+    writeln!(out, "pub const TOKENS: &[&[(&str, Rgb)]] = &[").unwrap();
+    for theme in &names {
+        writeln!(out, "    {}_TOKENS,", upper(theme)).unwrap();
+    }
+    writeln!(out, "];\n").unwrap();
+    writeln!(out, "pub const IS_DARK: &[bool] = &[").unwrap();
+    for theme in &names {
+        writeln!(out, "    {}_DARK,", upper(theme)).unwrap();
+    }
+    writeln!(out, "];\n").unwrap();
+    writeln!(out, "pub const FX_DURATION_MS: &[u32] = &[").unwrap();
+    for theme in &names {
+        writeln!(out, "    {}_FX_DURATION_MS,", upper(theme)).unwrap();
+    }
+    writeln!(out, "];\n").unwrap();
+
+    let dest = PathBuf::from(env::var("OUT_DIR").unwrap()).join("palettes.rs");
+    fs::write(dest, out).unwrap();
+}
