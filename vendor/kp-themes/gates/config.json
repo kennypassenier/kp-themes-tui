@@ -1,0 +1,77 @@
+{
+    "//": "House numbers that get tuned (standing rule 27, AR9). Standards constants \u2014 WCAG's 4.5, 3.0, three flashes per second, the 10% luminance change, 341x256 px \u2014 are pinned in the code with the reason, not here.",
+    "derivation": {
+        "//": "DI3, Carbon's grammar: hover is one step (a half until 3.1.0 \u2014 Kenny found it too faint on the showcase, KT8/H1), selected one, active two. Expressed in OKLCh lightness so a step looks the same size in every theme (AR4).",
+        "stepL": 0.06,
+        "hover": 1,
+        "selected": 1,
+        "active": 2,
+        "disabled": 0
+    },
+    "perceptualDistanceFloor": {
+        "//": "DI4. Not a standard \u2014 WCAG has no such threshold. Below roughly 10 two colours read as the same; 12 leaves a margin.",
+        "value": 12
+    },
+    "textureOpacityCeiling": {
+        "//": "DI9, from THEMING.md: the register layer must be felt, not seen. Advice rather than a gate since 2026-09-09 [Kenny]: `npm run advice` measures every theme against this one number and prints what it finds. The per-theme exception list that used to sit here is gone with the gate \u2014 a theme whose approved demo measured a stronger texture (phantom 0.14, dark 0.35, blueprint 0.18 at the time this was removed) now simply reads as over the ceiling in the advice, which is what it always was.",
+        "value": 0.06
+    },
+    "stateVisibilityFloor": {
+        "value": 10,
+        "why": "KT2: how far a pressed state must sit from its base colour before someone can see that they pressed it. House number on the same OKLab scale as perceptualDistanceFloor, not a standard \u2014 WCAG says nothing about state changes. Five themes reach 10.0 to 12.1 today; cyberpunk and terminal reach 2.6 to 8.4."
+    },
+    "badgePlateFloor": {
+        "value": 5,
+        "why": "KT2-3: how far a status badge's plate must sit from the surface under it before it stops reading as a badge. Deliberately low \u2014 the label carries the meaning (DI4), so the plate only has to read as a plate. Measured 2026-09-04: the worst plate sits 5.6 from its card (terminal, withdrawn). This is a floor against a future palette flattening a badge into its card, not a claim that 5 is comfortable."
+    },
+    "overflow": {
+        "//": "TH99, AR26. The three widths the overflow and rhythm gate measures every example page at, and the floor under which two stacked blocks count as touching.",
+        "viewportWidths": [320, 768, 1280],
+        "widthsWhy": "320 is the narrowest viewport WCAG SC 1.4.10 asks a page to reflow into, 768 is the tablet edge where a side column drops below, 1280 is the desktop width the rest of the browser suite already uses.",
+        "minBlockGap": 2,
+        "minBlockGapWhy": "The fault is two blocks TOUCHING \u2014 a gap of zero, which is what the chassis kit shipped. Two pixels is the floor that catches that without turning a deliberate 4px heading margin into a violation; it is not a claim that 2px is comfortable spacing."
+    },
+    "fontsBudgetBytes": {
+        "value": 1500000,
+        "why": "AR39: the shipped faces one theme names may weigh this much together. The critic measured 9-18 kB per latin woff2 face and priced the first draft's 3 MB as slack; woodblock and lapis ship a script subset beside latin and are the themes this number is really about. An operational knob (standing rule 27), not a standard. Kenny raised it for woodblock alone on 2026-09-08 (R6-Q6): its two Japanese families need a real bold face each, measured at 2,375,188 bytes together, and a synthesised bold thickens a Japanese stroke where a real face redraws it.",
+        "perTheme": {
+            "//": "A theme whose families cannot fit the shared number, each with the reason and the date Kenny raised it.",
+            "woodblock": 2500000
+        }
+    },
+    "stylesheets": {
+        "//": "The one stylesheet list every CSS gate reads [TH130]: a file and the roles it plays. authored: a human writes it and check-layers holds its colour discipline; generated: a generator writes it; bundled: dist/kp-themes.css concatenates it, in this order; classes: it declares class names (check-utilities, check-migration); motion: it may carry animations (check-motion); texture: it may declare --fx-texture (check-texture). gates.test.mjs refuses a css/ file in the manifest that has no entry here, so a new stylesheet cannot slip past a gate by being absent from its private list. Order matters for `bundled` only.",
+        "css/_header.css": ["authored"],
+        "css/_rules.css": ["authored", "motion", "texture"],
+        "css/_print.css": ["partial"],
+        "css/_density.css": ["partial"],
+        "css/themes.css": ["generated", "bundled", "classes"],
+        "css/components.css": ["authored", "bundled", "classes", "motion"],
+        "css/cyberpunk-register.css": ["authored", "bundled", "classes", "motion", "texture"],
+        "css/retro-register.css": ["authored", "bundled", "classes", "motion", "texture"],
+        "css/synthwave-register.css": ["authored", "bundled", "classes", "motion", "texture"],
+        "css/phantom-register.css": ["authored", "bundled", "classes", "motion", "texture"],
+        "css/terminal-register.css": ["authored", "bundled", "classes", "motion", "texture"],
+        "css/brutalism-register.css": ["authored", "bundled", "classes", "motion", "texture"],
+        "css/titanium-register.css": ["authored", "bundled", "classes", "motion", "texture"],
+        "css/pastel-register.css": ["authored", "bundled", "classes", "motion", "texture"],
+        "css/shade-light-register.css": ["authored", "bundled", "classes", "motion", "texture"],
+        "css/forest-register.css": ["authored", "bundled", "classes", "motion", "texture"],
+        "css/deco-register.css": ["authored", "bundled", "classes", "motion", "texture"],
+        "css/light-register.css": ["authored", "bundled", "classes", "motion", "texture"],
+        "css/grotesk-register.css": ["authored", "bundled", "classes", "motion", "texture"],
+        "css/blueprint-register.css": ["authored", "bundled", "classes", "motion", "texture"],
+        "css/nostromo-register.css": ["authored", "bundled", "classes", "motion", "texture"],
+        "css/dark-register.css": ["authored", "bundled", "classes", "motion", "texture"],
+        "css/formal-register.css": ["authored", "bundled", "classes", "motion", "texture"],
+        "css/sepia-register.css": ["authored", "bundled", "classes", "motion", "texture"],
+        "css/solstice-register.css": ["authored", "bundled", "classes", "motion", "texture"],
+        "css/high-contrast-register.css": ["authored", "bundled", "classes", "motion", "texture"],
+        "css/lapis-register.css": ["authored", "bundled", "classes", "motion", "texture"],
+        "css/shade-dark-register.css": ["authored", "bundled", "classes", "motion", "texture"],
+        "css/layout.css": ["authored", "bundled", "classes", "motion"],
+        "css/utilities.css": ["generated", "bundled", "classes"],
+        "css/tailwind-bridge.css": ["authored", "classes"],
+        "css/fonts.css": ["generated"]
+    }
+}

@@ -1,0 +1,7 @@
+# The kp-themes release this repository builds from. scripts/vendor-kp-themes.sh moves it;
+# gates/check-vendor.mjs holds vendor/kp-themes/ to it. sums is the sha256 of that
+# release's SHA256SUMS.
+version 8.0.0
+sha256 ceed6fc52c64b031ac82b064fbd58c24e580c29a5c839009a7eeebfdb73a82a0
+sums 6b64a67dd1e05e19e10d6e212765905fd8e6efd71cf93d0f6ecae5b34d6cb3d4
+url https://github.com/kennypassenier/kp-themes/releases/download/v8.0.0/tokens.tar

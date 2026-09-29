@@ -1,4 +1,6 @@
-# kp-tui 🖥
+# kp-themes-tui 🖥
+
+Renamed from kp-tui on 2026-09-29, when kp-themes split its non-web themes into repositories of their own [kp-themes scope-139]; the crates keep their names (`kp-tui`, `kp-tui-palette`).
 
 The kp-themes house themes in a terminal: generated palettes, a hand-written anatomy, and ratatui widgets.
 
@@ -13,7 +15,7 @@ gates hold from any session or terminal. After a fresh clone, run:
 
 | Field | Value |
 |---|---|
-| Current phase | **Building, after 0.1.1** (released 2026-09-26; 0.1.0 on 2026-09-20 with kp-themes 7.1.0). kp-themes' research is the scope [kp-themes scope-127]; the proof against homelab is `docs/HOMELAB_PROOF.md` |
+| Current phase | **Building, 0.2.0** (the palette generator moved in from kp-themes 2026-09-29; 0.1.1 released 2026-09-26; 0.1.0 on 2026-09-20 with kp-themes 7.1.0). kp-themes' research is the scope [kp-themes scope-127]; the proof against homelab is `docs/HOMELAB_PROOF.md` |
 | Last completed gate | **The keys form, 2026-09-26** (Hearth thread "kp-tui"): homelab's keys win, all missing behaviours built [fix-68], the bars read at a small font [fix-66-M1 closed], 0.1.1 after the key work |
 | Next gate | none open; the queue in docs/CORRECTIONS.md holds fix-2..fix-68 measurements, of which fix-68-M1 is the one still waiting (next screen rebuilt or changed) |
 | Next action | waiting on Kenny: the next direction for kp-tui — nothing is asked of him |

@@ -1,10 +1,9 @@
 //! The kp-themes palettes, exactly as the package generates them.
 //!
-//! `palette.rs` is vendored, not written here: kp-themes emits it from
-//! `themes/*/tokens.json` and attaches it to every release as
-//! `kp-tui-palette.rs`. Upgrading is a download and a copy, the way
-//! chassis-rs vendors the stylesheets, so a binary built from this crate
-//! needs no node_modules and no network.
+//! The palette is generated, not written by hand: `gates/generate-tui-palette.mjs`
+//! writes `generated_palette.rs` from the kp-themes tokens vendored in
+//! `vendor/kp-themes/`, pinned to a release. The output is committed, so a
+//! binary built from this crate needs no node_modules and no network.
 //!
 //! Nothing in this crate decides anything. What a terminal can carry of a
 //! theme BEYOND colour — border glyphs, case, prefixes, the cursor, the

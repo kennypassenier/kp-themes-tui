@@ -10,7 +10,7 @@ keywords = ["ratatui", "tui", "theme", "terminal", "widgets"]
 categories = ["command-line-interface"]
 
 [dependencies]
-kp-tui-palette = { path = "../kp-tui-palette", version = "0.1.1" }
+kp-tui-palette = { path = "../kp-tui-palette", version = "0.2.0" }
 ratatui = "0.30"
 crossterm = "0.29"
 # The journal feed reads `journalctl --output=json`; nothing else needs it.

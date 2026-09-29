@@ -27,3 +27,6 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Tests
         run: cargo test --workspace
+      # The runner ships node; the palette's two checks need nothing else.
+      - name: The vendored tokens and the generated palette
+        run: node gates/check-vendor.mjs && node gates/generate-tui-palette.mjs --check

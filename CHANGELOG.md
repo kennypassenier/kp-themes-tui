@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.0 — 2026-09-29
+
+**Changed.** The repository is kp-themes-tui (was kp-tui), and the palette is
+generated here: `gates/generate-tui-palette.mjs` moved in from kp-themes with
+its history [kp-themes scope-139], and writes
+`crates/kp-tui-palette/src/generated_palette.rs` from the kp-themes 8.0.0
+tokens vendored in `vendor/kp-themes/` and pinned in `vendor/PIN`. Every
+colour is the same as the 7.1.0 palette; `KP_THEMES_VERSION` reads `8.0.0`.
+The ratatui research and its demo moved in too, under `research/ratatui/`.
+
 ## 0.1.1 — 2026-09-26
 
 **Changed.** A log stamp is drawn to the second. `LogLine::to_the_second`

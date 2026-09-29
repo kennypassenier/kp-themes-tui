@@ -1,29 +1,25 @@
-// The twenty-two palettes as Rust, for kp-tui [scope-127, scope-128].
+// The twenty-two kp-themes palettes as Rust, for the kp-tui-palette crate
+// [kp-themes scope-127, scope-128, scope-139].
 //
-// kp-tui is a Rust workspace of two crates: a generated palette with no
-// judgement in it, and a hand-written anatomy with widgets. This writes the
-// first one. The pattern is the one ha/ and vscode/ already follow — the
-// package generates a file in the format its consumer copies, and a
-// `--check` refuses a copy that has drifted from the tokens.
-//
-// Why a file rather than a crate build script that reads this repository:
-// chassis-rs, kyu and Almanac all vendor rather than depend, because a Rust
-// binary that needs a node_modules beside it is a binary that breaks on the
-// machine that has none. kp-tui copies `tui/palette.rs` at an upgrade, the
-// way chassis-rs copies the stylesheets, and its own parity test measures
-// the copy against the release it names.
+// A generated palette with no judgement in it; the anatomy and the widgets
+// in the kp-tui crate are hand-written. The tokens come from
+// vendor/kp-themes/, the kp-themes release vendor/PIN names, and the output
+// is committed, so a binary built from this workspace needs no node and no
+// network: node runs only here, when the pin moves, and in the gates, where
+// `--check` refuses a palette that drifted from the tokens.
 //
 // Usage:
-//   node gates/generate-tui-palette.mjs           write tui/palette.rs
+//   node gates/generate-tui-palette.mjs           write crates/kp-tui-palette/src/generated_palette.rs
 //   node gates/generate-tui-palette.mjs --check   exit 1 if it would change
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import process from 'node:process';
-import { themes } from './check-invariants.mjs';
-import { derivedBlock, rgbOf } from './palette.mjs';
+import { themes } from '../vendor/kp-themes/gates/check-invariants.mjs';
+import { derivedBlock, rgbOf } from '../vendor/kp-themes/gates/palette.mjs';
 
-const OUT = new URL('../tui/', import.meta.url);
-const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+const OUT = new URL('../crates/kp-tui-palette/src/', import.meta.url);
+/** The kp-themes release vendor/PIN names; the palette carries it as KP_THEMES_VERSION. */
+const VERSION = readFileSync(new URL('../vendor/kp-themes/VERSION', import.meta.url), 'utf8').trim();
 
 /**
  * Rust field, CSS token, and the role a sixteen-colour terminal falls back
@@ -118,7 +114,7 @@ export function render() {
 
 function main() {
     const text = render();
-    const path = new URL('palette.rs', OUT);
+    const path = new URL('generated_palette.rs', OUT);
     if (process.argv.includes('--check')) {
         let current = '';
         try {
@@ -127,8 +123,8 @@ function main() {
             current = '';
         }
         if (current !== text) {
-            console.error('tui/palette.rs does not match its source.');
-            console.error('Run `npm run generate:tui` and commit the result.');
+            console.error('crates/kp-tui-palette/src/generated_palette.rs does not match its source.');
+            console.error('Run `node gates/generate-tui-palette.mjs` and commit the result.');
             process.exit(1);
         }
         const count = (text.match(/^    Theme \{$/gm) ?? []).length;
@@ -137,7 +133,7 @@ function main() {
     }
     mkdirSync(OUT, { recursive: true });
     writeFileSync(path, text);
-    console.log(`wrote tui/palette.rs from ${themes().length} themes.`);
+    console.log(`wrote crates/kp-tui-palette/src/generated_palette.rs from ${themes().length} themes.`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) main();
