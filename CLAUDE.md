@@ -41,5 +41,6 @@ gates hold from any session or terminal. After a fresh clone, run:
 
 Commits are blocked by `.claude/hooks/check-commit.sh` unless
 `.claude/hooks/gates.sh` passes and the message carries IDs in
-brackets (`[W12]`, `[L4b]`, `[meta]`). CI re-runs the same gates on
-every push; red blocks merge.
+brackets (`[W12]`, `[L4b]`, `[meta]`). There is no GitHub Actions CI
+since 2026-09-29 (Kenny: every build and check runs locally); the commit
+gate is the whole guarantee.

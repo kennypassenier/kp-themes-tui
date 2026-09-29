@@ -77,8 +77,9 @@ plus its anatomy), and the widgets:
 
 Started 2026-09-17, first release `0.1.0` on 2026-09-20, latest `0.1.1` on
 2026-09-26 ([CHANGELOG.md](CHANGELOG.md)), pinned to the kp-themes 7.1.0
-palette. The crates build, 80 tests pass, clippy is clean, and CI runs fmt,
-clippy and the suite on every push.
+palette. The crates build, 80 tests pass, clippy is clean, and the commit
+gate (`.claude/hooks/gates.sh`) runs fmt, clippy, the suite and the palette
+checks locally before every commit; nothing runs on GitHub Actions.
 
 The demo draws eleven screens — `dashboard`, `components`, `console`,
 `effects`, `fleet`, `ops`, `settings`, `logs`, `deploy`, `doctor`,
