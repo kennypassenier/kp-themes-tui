@@ -20,10 +20,9 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import process from 'node:process';
 import { themes } from './check-invariants.mjs';
-import { hsl } from './colour.mjs';
+import { derivedBlock, rgbOf } from './palette.mjs';
 
 const OUT = new URL('../tui/', import.meta.url);
-const CSS = readFileSync(new URL('../css/themes.css', import.meta.url), 'utf8');
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
 /**
@@ -69,32 +68,6 @@ const FIELDS = [
     ['code_keyword', 'code-keyword', 'Ink'],
     ['code_string', 'code-string', 'Ink'],
 ];
-
-/**
- * The derived states live only in the generated stylesheet: they are
- * computed in OKLCh there, and reading that output keeps one implementation
- * of the derivation instead of a second one here.
- * @param {string} name @param {string} [css]
- * @returns {Record<string, string>}
- */
-export function derivedBlock(name, css = CSS) {
-    const block = new RegExp(`^\\[data-theme='${name}'\\] \\{\\n([\\s\\S]*?)^\\}`, 'm').exec(css);
-    if (block === null) throw new Error(`css/themes.css has no block for ${name}`);
-    /** @type {Record<string, string>} */
-    const values = {};
-    for (const m of block[1].matchAll(/^\s*--([a-z0-9-]+):\s*([^;]+);/gm)) values[m[1]] = m[2].trim();
-    return values;
-}
-
-/**
- * `hsl(...)` as the three bytes a terminal receives.
- * @param {string} value
- * @returns {[number, number, number]}
- */
-export function rgbOf(value) {
-    const [r, g, b] = hsl(value);
-    return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
-}
 
 /** @returns {string} */
 export function render() {
