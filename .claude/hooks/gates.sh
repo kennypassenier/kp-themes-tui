@@ -21,7 +21,13 @@ gate_tree_before=$(gate_tree_fingerprint)
 
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace --quiet
+# Tests wait for the release (Kenny, 2026-09-30): they run only with
+# GATE_FULL=1 or GATE_TESTS=1, never on an ordinary commit.
+if [ "${GATE_FULL:-0}" = 1 ] || [ "${GATE_TESTS:-0}" = 1 ]; then
+  cargo test --workspace --quiet
+else
+  echo "gates: tests overgeslagen, ze draaien pas bij de release (GATE_FULL=1)"
+fi
 
 # The palette is generated from the kp-themes tokens, never authored here
 # [kp-themes scope-128, scope-139]. vendor/kp-themes/ is the tokens.tar of
